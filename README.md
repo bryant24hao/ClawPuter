@@ -1,75 +1,118 @@
-# Cardputer Pixel Companion
+# Cardputer Companion 🦞
 
-A pixel-art desktop companion on M5Stack Cardputer (ESP32-S3). OpenClaw lobster character + clock + AI chat.
+[中文](README_CN.md)
 
-M5Stack Cardputer (ESP32-S3) 上的像素风桌面伴侣。OpenClaw 小龙虾角色 + 时钟 + AI 聊天。
+A pixel-art desktop companion running on M5Stack Cardputer (ESP32-S3). Features an OpenClaw-themed lobster character with animations, day/night clock, and AI chat — powered by [OpenClaw](https://github.com/openclaw/openclaw).
 
-## Features / 功能
+## Features
 
-- **Companion Mode / 伴侣模式**: Pixel lobster with idle/blink/happy/sleep/talk animations, starry background, NTP clock
-- **Chat Mode / 聊天模式**: Keyboard input, Kimi K2.5 API conversation, message bubbles
-- **Config Management / 配置管理**: WiFi/API Key via environment variables or keyboard input, NVS persistent storage
+- **Companion Mode** — Pixel lobster with idle, happy, sleep, talk, stretch, and look-around animations. Day/night background with stars and moon. NTP clock display.
+- **Chat Mode** — Full keyboard input, AI conversation via OpenClaw Gateway (OpenAI-compatible API), scrollable message history with word-wrap.
+- **OpenClaw Integration** — Connects to your local OpenClaw Gateway over LAN. Multi-model fallback (Kimi/Claude/GPT/Gemini), persistent memory, 5400+ community skills.
+- **Boot Animation** — Lobster pixel-art line-by-line reveal with pixel wipe transitions between modes.
+- **Sound Effects** — Key clicks, happy melody, notification tones via built-in speaker.
 
-## Quick Start / 快速开始
+## Quick Start
 
-### 1. Set Environment Variables / 设置环境变量
+### 1. Set Environment Variables
 
 ```bash
 export WIFI_SSID="your_wifi_name"
 export WIFI_PASS="your_wifi_password"
-export CLAUDE_API_KEY="your_api_key"
+export OPENCLAW_HOST="192.168.1.100"   # your Mac/VPS LAN IP
+export OPENCLAW_PORT="18789"
+export OPENCLAW_TOKEN="your_gateway_token"
 ```
 
-### 2. Build & Flash / 编译烧录
+### 2. Build & Flash
 
 ```bash
-cd CardputerCompanion
 pio run -t upload
 ```
 
-First-time flashing may require entering download mode (hold G0 + press Reset). See [Flash Guide](docs/setup-and-flash.md).
+First-time flashing may require download mode: hold **G0** + press **Reset**, then release G0. See [Setup Guide](docs/setup-and-flash.md) for details.
 
-首次烧录可能需要手动进入下载模式（按住 G0 + 按 Reset），详见 [烧录指南](docs/setup-and-flash.md)。
-
-### 3. Serial Debug / 串口调试
+### 3. Serial Debug
 
 ```bash
 pio device monitor
 ```
 
-## Controls / 操作方式
+## Controls
 
-| Key / 按键 | Companion Mode / 伴侣模式 | Chat Mode / 聊天模式 |
-|------------|--------------------------|---------------------|
-| TAB | Switch to chat / 切换到聊天 | Switch to companion / 切换到伴侣 |
-| Space/Enter | Happy animation / 角色开心跳跃 | Send message / 发送消息 |
-| Backspace | - | Delete char / 删除字符 |
-| Fn+R | Reset config / 重置配置 | - |
-| Any key / 任意键 | Wake up / 唤醒角色 | Type char / 输入字符 |
+| Key | Companion Mode | Chat Mode |
+|-----|---------------|-----------|
+| TAB | Switch to chat | Switch to companion |
+| Space / Enter | Happy animation | Send message |
+| Backspace | — | Delete character |
+| Fn + ; | — | Scroll up |
+| Fn + / | — | Scroll down |
+| Fn + R | Reset config | — |
+| Any key | Wake up lobster | Type character |
 
-## Project Structure / 项目结构
+## Project Structure
 
 ```
 src/
-├── main.cpp          # Entry point, mode dispatch, WiFi/NTP init
-├── companion.h/cpp   # Companion mode: character rendering, state machine, clock
-├── chat.h/cpp        # Chat mode: message bubbles, input bar, scrolling
-├── ai_client.h/cpp   # API client (OpenAI-compatible format)
-├── sprites.h         # Pixel lobster sprites (RGB565 const arrays)
-├── config.h/cpp      # WiFi/API Key config, NVS read/write
-└── utils.h           # Color definitions, screen constants, Timer utility
+├── main.cpp          # Entry point, mode dispatch, WiFi/NTP
+├── companion.h/cpp   # Companion mode: animations, state machine, clock
+├── chat.h/cpp        # Chat mode: messages, input bar, scrolling
+├── ai_client.h/cpp   # OpenClaw Gateway client (OpenAI-compatible)
+├── sprites.h         # Pixel lobster sprites (RGB565)
+├── config.h/cpp      # WiFi/API config, NVS persistence
+└── utils.h           # Colors, screen constants, Timer
 ```
 
-## Hardware / 硬件
+## Hardware
 
-- M5Stack Cardputer (ESP32-S3, 240x135 display, 56-key keyboard)
-- ESP32-S3 supports **2.4GHz WiFi only**
+- **M5Stack Cardputer** — ESP32-S3, 240×135 IPS display, 56-key keyboard
+- ESP32-S3 supports **2.4GHz WiFi only** (no 5GHz)
 
-## Docs / 文档
+## OpenClaw Setup
 
-- [Open Source Research / 开源项目调研](docs/research.md)
-- [Setup & Flash Guide / 环境搭建与烧录](docs/setup-and-flash.md)
-- [Hardware Notes / 硬件要点](docs/hardware-notes.md)
-- [API Integration / API 接入记录](docs/api-integration.md)
-- [Architecture / 代码架构](docs/architecture.md)
-- [Troubleshooting / 问题排查](docs/troubleshooting.md)
+This project connects to an OpenClaw Gateway running on your Mac or VPS. To set up:
+
+1. [Install OpenClaw](https://openclaw.ai)
+2. Enable LAN binding and HTTP API in `~/.openclaw/openclaw.json`:
+   ```json
+   {
+     "gateway": {
+       "bind": "lan",
+       "http": {
+         "endpoints": {
+           "chatCompletions": { "enabled": true }
+         }
+       }
+     }
+   }
+   ```
+3. Restart gateway: `openclaw gateway restart`
+4. Set `OPENCLAW_HOST` to your Mac's LAN IP
+
+See [OpenClaw Research](docs/openclaw-research.md) for the full integration guide.
+
+## Documentation
+
+- [Setup & Flash Guide](docs/setup-and-flash.md)
+- [Hardware Notes](docs/hardware-notes.md)
+- [API Integration Story](docs/api-integration.md)
+- [Architecture](docs/architecture.md)
+- [OpenClaw Integration](docs/openclaw-research.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Roadmap](docs/roadmap.md)
+
+## Roadmap
+
+- [ ] Battery display with low-power character animation
+- [ ] Chat history persistence (NVS/SD card)
+- [ ] Streaming responses (SSE)
+- [ ] Pet system (hunger/mood mechanics)
+- [ ] Pomodoro timer
+- [ ] Weather display
+- [ ] BLE phone notifications
+
+See [full roadmap](docs/roadmap.md).
+
+## License
+
+MIT

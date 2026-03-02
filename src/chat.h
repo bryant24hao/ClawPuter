@@ -19,6 +19,10 @@ public:
     bool hasPendingMessage() const { return pendingMessage.length() > 0; }
     String takePendingMessage();
 
+    // Set input buffer (for voice input results)
+    void setInput(const String& text);
+    const String& getInput() const { return inputBuffer; }
+
 private:
     static constexpr int MAX_MESSAGES = 20;
     static constexpr int INPUT_BAR_H = 16;

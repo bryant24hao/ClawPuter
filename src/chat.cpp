@@ -19,7 +19,7 @@ void Chat::update(M5Canvas& canvas) {
     // Header
     canvas.setTextColor(Color::CLOCK_TEXT);
     canvas.setTextSize(1);
-    canvas.drawString("[TAB] back  [;] up  [/] down", 4, 2);
+    canvas.drawString("[TAB]back [;/]scroll [Fn]voice", 4, 2);
     canvas.drawFastHLine(0, MSG_AREA_Y - 1, SCREEN_W, Color::GROUND_TOP);
 
     drawMessages(canvas);
@@ -89,6 +89,10 @@ String Chat::takePendingMessage() {
     String msg = pendingMessage;
     pendingMessage = "";
     return msg;
+}
+
+void Chat::setInput(const String& text) {
+    inputBuffer = text;
 }
 
 void Chat::addMessage(const String& text, bool isUser) {

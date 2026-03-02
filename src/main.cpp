@@ -7,12 +7,14 @@
 #include "chat.h"
 #include "ai_client.h"
 #include "state_broadcast.h"
+#include "voice_input.h"
 
 // ── Globals ──
 M5Canvas canvas(&M5Cardputer.Display);
 Companion companion;
 Chat chat;
 AIClient aiClient;
+VoiceInput voiceInput;
 
 enum class AppMode { SETUP, COMPANION, CHAT };
 static AppMode appMode = AppMode::SETUP;
@@ -127,8 +129,54 @@ void loop() {
             canvas.pushSprite(0, 0);
             break;
 
-        case AppMode::CHAT:
-            if (keyPressed) {
+        case AppMode::CHAT: {
+            // ── Voice input: detect Fn key hold for push-to-talk ──
+            // Read Fn state every frame (not just on key change)
+            auto currentKeys = M5Cardputer.Keyboard.keysState();
+            static bool fnHeld = false;
+            bool fnNow = currentKeys.fn;
+            // Only treat as voice trigger if Fn is pressed alone (no other keys)
+            bool fnAlone = fnNow && currentKeys.word.size() == 0
+                           && !currentKeys.tab && !currentKeys.enter
+                           && !currentKeys.del;
+
+            if (fnAlone && !fnHeld && !voiceInput.isRecording()
+                && !aiClient.isBusy() && !voiceInput.isTranscribing()) {
+                voiceInput.startRecording();
+            }
+            if (!fnAlone && fnHeld && voiceInput.isRecording()) {
+                // Show transcribing state before blocking HTTP call
+                chat.update(canvas);
+                voiceInput.drawTranscribingBar(canvas);
+                canvas.pushSprite(0, 0);
+
+                if (voiceInput.stopRecording()) {
+                    String text = voiceInput.takeResult();
+                    if (text.length() > 0) {
+                        chat.setInput(text);
+                    }
+                }
+            }
+            fnHeld = fnAlone;
+
+            // Auto-stop at max duration
+            if (voiceInput.isRecording()
+                && voiceInput.getRecordingDuration() >= 10.0f) {
+                chat.update(canvas);
+                voiceInput.drawTranscribingBar(canvas);
+                canvas.pushSprite(0, 0);
+
+                if (voiceInput.stopRecording()) {
+                    String text = voiceInput.takeResult();
+                    if (text.length() > 0) {
+                        chat.setInput(text);
+                    }
+                }
+                fnHeld = false;
+            }
+
+            // ── Normal keyboard input ──
+            if (keyPressed && !voiceInput.isRecording()) {
                 if (keys.tab) {
                     playTransition(canvas, false);
                     enterCompanionMode();
@@ -145,7 +193,8 @@ void loop() {
                         chat.scrollUp();
                     } else if (keys.fn && key == '/') {
                         chat.scrollDown();
-                    } else {
+                    } else if (!keys.fn) {
+                        // Only type if Fn is not held (avoid typing during voice)
                         Serial.printf("[CHAT] Key: %c\n", key);
                         chat.handleKey(key);
                     }
@@ -180,9 +229,15 @@ void loop() {
                 );
             }
 
+            // ── Draw ──
             chat.update(canvas);
+            // Override input bar if recording or transcribing
+            if (voiceInput.isRecording()) {
+                voiceInput.drawRecordingBar(canvas);
+            }
             canvas.pushSprite(0, 0);
             break;
+        }
     }
 
     // Broadcast state over UDP for desktop sync
@@ -342,6 +397,9 @@ void connectWiFi() {
         if (Config::getApiKey().length() > 0) {
             aiClient.begin(Config::getApiKey());
         }
+
+        // Init voice input
+        voiceInput.begin();
 
         enterCompanionMode();
     } else {

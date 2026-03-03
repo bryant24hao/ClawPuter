@@ -1,34 +1,44 @@
 #include "voice_input.h"
 #include "config.h"
 #include <WiFiClient.h>
-#include <ArduinoJson.h>
 
-#ifndef OPENCLAW_HOST
-#define OPENCLAW_HOST ""
+#ifndef STT_PROXY_HOST
+#define STT_PROXY_HOST ""
 #endif
-#ifndef OPENCLAW_PORT
-#define OPENCLAW_PORT ""
-#endif
-#ifndef OPENCLAW_TOKEN
-#define OPENCLAW_TOKEN ""
+#ifndef STT_PROXY_PORT
+#define STT_PROXY_PORT "8090"
 #endif
 
 void VoiceInput::begin() {
-    // Allocate recording buffer for MAX_RECORD_SEC seconds
+    // Only compute size — buffer allocated on demand in startRecording()
+    // and freed after STT in stopRecording() to keep ~190KB free during chat.
     maxSamples = (size_t)(SAMPLE_RATE * MAX_RECORD_SEC);
+    Serial.printf("[VOICE] Ready (buffer will be %zu bytes on demand)\n",
+                  maxSamples * sizeof(int16_t));
+}
+
+bool VoiceInput::allocBuffer() {
+    if (recordBuffer) return true;  // already allocated
     size_t bytes = maxSamples * sizeof(int16_t);
 
-    // Try PSRAM first, fallback to internal
     recordBuffer = (int16_t*)heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!recordBuffer) {
         recordBuffer = (int16_t*)heap_caps_malloc(bytes, MALLOC_CAP_8BIT);
     }
 
     if (recordBuffer) {
-        Serial.printf("[VOICE] Buffer allocated: %zu bytes (%zu samples)\n", bytes, maxSamples);
-    } else {
-        Serial.println("[VOICE] ERROR: Failed to allocate recording buffer");
-        maxSamples = 0;
+        Serial.printf("[VOICE] Buffer allocated: %zu bytes, heap=%u\n", bytes, ESP.getFreeHeap());
+        return true;
+    }
+    Serial.printf("[VOICE] Buffer allocation failed! heap=%u\n", ESP.getFreeHeap());
+    return false;
+}
+
+void VoiceInput::freeBuffer() {
+    if (recordBuffer) {
+        heap_caps_free(recordBuffer);
+        recordBuffer = nullptr;
+        Serial.printf("[VOICE] Buffer freed, heap=%u\n", ESP.getFreeHeap());
     }
 }
 
@@ -54,7 +64,10 @@ void VoiceInput::deinitMic() {
 }
 
 void VoiceInput::startRecording() {
-    if (recording || !recordBuffer || maxSamples == 0) return;
+    if (recording || maxSamples == 0) return;
+
+    // Allocate buffer on demand (freed after STT completes)
+    if (!allocBuffer()) return;
 
     samplesRecorded = 0;
     recording = true;
@@ -82,20 +95,24 @@ bool VoiceInput::stopRecording() {
 
     Serial.printf("[VOICE] Recorded %.1fs (%zu samples)\n", elapsed, samplesRecorded);
 
-    // Too short? Ignore
+    // Too short? Ignore — but still free buffer
     if (elapsed < MIN_RECORD_SEC) {
         Serial.println("[VOICE] Too short, ignoring");
+        freeBuffer();
         result = "";
         return false;
     }
 
-    // Send to STT
+    // Send to STT — sendToSTT() frees the buffer internally after upload,
+    // so ~190KB is available while waiting for Whisper response.
     transcribing = true;
     result = sendToSTT(recordBuffer, samplesRecorded);
     transcribing = false;
+    // Ensure buffer is freed even if sendToSTT had an early exit
+    freeBuffer();
 
     if (result.length() > 0) {
-        Serial.println("[VOICE] STT result: " + result);
+        Serial.printf("[VOICE] STT result: %s\n", result.c_str());
         return true;
     }
 
@@ -163,118 +180,155 @@ void VoiceInput::writeWavHeader(uint8_t* h, uint32_t dataSize) {
 String VoiceInput::sendToSTT(const int16_t* data, size_t sampleCount) {
     uint32_t dataSize = sampleCount * sizeof(int16_t);
 
-    // Build WAV in memory: 44 byte header + PCM data
+    // Build WAV header on stack
     uint8_t wavHeader[44];
     writeWavHeader(wavHeader, dataSize);
 
-    // Multipart form-data boundary
+    // Multipart parts as stack char arrays — no heap allocation
     const char* boundary = "----VoiceBoundary1234";
-
-    // Build the multipart body parts
-    String partHeader = String("--") + boundary + "\r\n"
+    char partHeader[160];
+    snprintf(partHeader, sizeof(partHeader),
+        "--%s\r\n"
         "Content-Disposition: form-data; name=\"file\"; filename=\"recording.wav\"\r\n"
-        "Content-Type: audio/wav\r\n\r\n";
+        "Content-Type: audio/wav\r\n\r\n", boundary);
 
-    String partFooter = String("\r\n--") + boundary + "\r\n"
+    char partFooter[128];
+    snprintf(partFooter, sizeof(partFooter),
+        "\r\n--%s\r\n"
         "Content-Disposition: form-data; name=\"model\"\r\n\r\n"
-        "whisper-1\r\n"
-        "--" + boundary + "--\r\n";
+        "whisper-large-v3-turbo\r\n"
+        "--%s--\r\n", boundary, boundary);
 
-    size_t totalSize = partHeader.length() + 44 + dataSize + partFooter.length();
+    size_t totalSize = strlen(partHeader) + 44 + dataSize + strlen(partFooter);
 
-    // Use raw WiFiClient for streaming upload (body too large for HTTPClient)
+    // Connect to local STT proxy over HTTP (proxy forwards to Groq HTTPS)
     WiFiClient client;
     client.setTimeout(30);
 
-    int port = atoi(OPENCLAW_PORT);
-    Serial.printf("[VOICE] Connecting to %s:%d\n", OPENCLAW_HOST, port);
+    int port = atoi(STT_PROXY_PORT);
+    Serial.printf("[VOICE] Connecting to STT proxy %s:%d...\n", STT_PROXY_HOST, port);
 
-    if (!client.connect(OPENCLAW_HOST, port)) {
-        Serial.println("[VOICE] Connection failed");
+    if (!client.connect(STT_PROXY_HOST, port)) {
+        Serial.println("[VOICE] Connection to STT proxy failed");
         return "";
     }
 
-    // Send HTTP request line and headers
-    client.print(String("POST /v1/audio/transcriptions HTTP/1.1\r\n") +
-                 "Host: " + OPENCLAW_HOST + ":" + OPENCLAW_PORT + "\r\n" +
-                 "Authorization: Bearer " + OPENCLAW_TOKEN + "\r\n" +
-                 "Content-Type: multipart/form-data; boundary=" + boundary + "\r\n" +
-                 "Content-Length: " + String(totalSize) + "\r\n" +
-                 "Connection: close\r\n\r\n");
-
-    // Send multipart body: file part header + WAV header + PCM data + footer
+    // Send HTTP headers + multipart file part header + WAV header
+    client.printf("POST /v1/audio/transcriptions HTTP/1.1\r\n"
+                  "Host: %s:%s\r\n"
+                  "Content-Type: multipart/form-data; boundary=%s\r\n"
+                  "Content-Length: %u\r\n"
+                  "Connection: close\r\n\r\n",
+                  STT_PROXY_HOST, STT_PROXY_PORT, boundary, totalSize);
     client.print(partHeader);
     client.write(wavHeader, 44);
 
-    // Send PCM data in chunks to avoid buffer overflow
+    // Send PCM data in chunks
     const uint8_t* pcmBytes = (const uint8_t*)data;
     size_t remaining = dataSize;
     size_t offset = 0;
-    const size_t CHUNK_SIZE = 4096;
-
     while (remaining > 0) {
-        size_t toSend = (remaining > CHUNK_SIZE) ? CHUNK_SIZE : remaining;
+        size_t toSend = (remaining > 4096) ? 4096 : remaining;
         client.write(pcmBytes + offset, toSend);
         offset += toSend;
         remaining -= toSend;
-        yield(); // let WiFi stack process
+        yield();
     }
 
     client.print(partFooter);
     client.flush();
 
-    // Wait for response (server processes audio, may take a few seconds)
+    Serial.printf("[VOICE] Audio sent (%u bytes)\n", totalSize);
+
+    // ── Free 160KB buffer NOW — data is fully sent, buffer no longer needed ──
+    freeBuffer();
+
+    // ── Wait for response (~190KB free heap now) ──
     unsigned long deadline = millis() + 30000;
     while (!client.available() && client.connected() && millis() < deadline) {
         delay(10);
     }
 
     if (!client.available()) {
-        Serial.println("[VOICE] STT timeout — no response");
+        Serial.println("[VOICE] STT timeout");
         client.stop();
         return "";
     }
 
-    // Read response: skip HTTP headers, then read body
-    String response;
+    // Read response into stack buffer — skip headers, read body
+    // STT JSON is small: {"text":"..."} typically < 200 bytes
+    char responseBuf[512];
+    int respLen = 0;
     bool headersDone = false;
-    while (client.connected() || client.available()) {
-        if (millis() > deadline) {
-            Serial.println("[VOICE] Response read timeout");
-            break;
-        }
-        if (client.available()) {
-            String line = client.readStringUntil('\n');
+    char lineBuf[256];
+    int lineLen = 0;
+
+    while ((client.connected() || client.available()) && millis() < deadline) {
+        if (!client.available()) { delay(5); continue; }
+        char c = client.read();
+        if (c == '\n') {
+            lineBuf[lineLen] = '\0';
+            if (lineLen > 0 && lineBuf[lineLen-1] == '\r') lineBuf[--lineLen] = '\0';
             if (!headersDone) {
-                // Empty line (just \r) marks end of headers
-                if (line == "\r" || line.length() == 0) {
-                    headersDone = true;
-                }
+                if (lineLen == 0) headersDone = true;
             } else {
-                response += line;
+                // Append to response body
+                int copyLen = lineLen;
+                if (respLen + copyLen >= (int)sizeof(responseBuf) - 1)
+                    copyLen = sizeof(responseBuf) - 1 - respLen;
+                if (copyLen > 0) {
+                    memcpy(responseBuf + respLen, lineBuf, copyLen);
+                    respLen += copyLen;
+                }
             }
-        } else {
-            delay(5);
+            lineLen = 0;
+        } else if (lineLen < (int)sizeof(lineBuf) - 1) {
+            lineBuf[lineLen++] = c;
         }
     }
+    responseBuf[respLen] = '\0';
 
     client.stop();
 
-    Serial.println("[VOICE] Response: " + response);
+    Serial.printf("[VOICE] Response: %s\n", responseBuf);
 
-    // Parse JSON: {"text": "..."}
-    JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, response);
-    if (err) {
-        Serial.printf("[VOICE] JSON parse error: %s\n", err.c_str());
+    // Extract "text" from JSON without ArduinoJson — zero heap allocation
+    // Format: {"text":"the transcribed text"}
+    const char* textKey = strstr(responseBuf, "\"text\":\"");
+    if (!textKey) {
+        textKey = strstr(responseBuf, "\"text\": \"");
+        if (textKey) textKey += 9;
+    } else {
+        textKey += 8;
+    }
+
+    if (!textKey) {
+        Serial.println("[VOICE] No 'text' field in response");
         return "";
     }
 
-    const char* text = doc["text"];
-    if (text && strlen(text) > 0) {
-        return String(text);
+    // Extract value, handling JSON escapes
+    char textBuf[256];
+    int ti = 0;
+    const char* p = textKey;
+    while (*p && *p != '"' && ti < (int)sizeof(textBuf) - 1) {
+        if (*p == '\\' && p[1]) {
+            switch (p[1]) {
+                case '"':  textBuf[ti++] = '"';  p += 2; break;
+                case '\\': textBuf[ti++] = '\\'; p += 2; break;
+                case 'n':  textBuf[ti++] = '\n'; p += 2; break;
+                case '/':  textBuf[ti++] = '/';  p += 2; break;
+                default:   p += 2; break;
+            }
+        } else {
+            textBuf[ti++] = *p++;
+        }
     }
+    textBuf[ti] = '\0';
 
+    if (ti > 0) {
+        return filterForDisplay(String(textBuf));
+    }
     return "";
 }
 
@@ -312,8 +366,8 @@ void VoiceInput::drawTranscribingBar(M5Canvas& canvas) {
     canvas.setTextColor(Color::CHAT_AI);
     canvas.setTextSize(1);
 
-    int dots = (millis() / 400) % 4;
-    String msg = "Transcribing";
-    for (int i = 0; i < dots; i++) msg += ".";
-    canvas.drawString(msg.c_str(), 4, barY + 4);
+    static const char* msgs[] = {
+        "Transcribing", "Transcribing.", "Transcribing..", "Transcribing..."
+    };
+    canvas.drawString(msgs[(millis() / 400) % 4], 4, barY + 4);
 }

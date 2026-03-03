@@ -1,6 +1,5 @@
 #include "state_broadcast.h"
 #include <WiFiUdp.h>
-#include <ArduinoJson.h>
 #include "utils.h"
 
 static WiFiUDP udp;
@@ -15,13 +14,8 @@ void stateBroadcastBegin() {
 void stateBroadcastTick(int state, int frame, const char* mode) {
     if (!broadcastTimer.tick()) return;
 
-    JsonDocument doc;
-    doc["s"] = state;
-    doc["f"] = frame;
-    doc["m"] = mode;
-
     char buf[64];
-    size_t len = serializeJson(doc, buf, sizeof(buf));
+    int len = snprintf(buf, sizeof(buf), "{\"s\":%d,\"f\":%d,\"m\":\"%s\"}", state, frame, mode);
 
     udp.beginPacket("255.255.255.255", BROADCAST_PORT);
     udp.write((const uint8_t*)buf, len);

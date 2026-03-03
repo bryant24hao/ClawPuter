@@ -130,72 +130,83 @@ void loop() {
             break;
 
         case AppMode::CHAT: {
-            // ── Voice input: detect Fn key hold for push-to-talk ──
-            // Read Fn state every frame (not just on key change)
-            auto currentKeys = M5Cardputer.Keyboard.keysState();
-            static bool fnHeld = false;
-            bool fnNow = currentKeys.fn;
-            // Only treat as voice trigger if Fn is pressed alone (no other keys)
-            bool fnAlone = fnNow && currentKeys.word.size() == 0
-                           && !currentKeys.tab && !currentKeys.enter
-                           && !currentKeys.del;
+            // ── Keyboard state via keysState() + manual edge detection ──
+            // We bypass isChange() which fails after blocking STT calls.
+            // keysState() always returns fresh data — proven reliable in all rounds.
+            auto ks = M5Cardputer.Keyboard.keysState();
+            static bool pFn = false, pEnter = false, pDel = false, pTab = false;
+            static char pWordChar = 0;
+            bool didBlock = false;
 
-            if (fnAlone && !fnHeld && !voiceInput.isRecording()
+            bool fnDown = ks.fn && !pFn;
+            bool fnUp = !ks.fn && pFn;
+            bool fnAlone = ks.fn && ks.word.size() == 0
+                           && !ks.tab && !ks.enter && !ks.del;
+
+            // ── Voice input: Fn push-to-talk ──
+            if (fnDown && fnAlone && !voiceInput.isRecording()
                 && !aiClient.isBusy() && !voiceInput.isTranscribing()) {
                 voiceInput.startRecording();
             }
-            if (!fnAlone && fnHeld && voiceInput.isRecording()) {
-                // Show transcribing state before blocking HTTP call
+            if (fnUp && voiceInput.isRecording()) {
                 chat.update(canvas);
                 voiceInput.drawTranscribingBar(canvas);
                 canvas.pushSprite(0, 0);
-
                 if (voiceInput.stopRecording()) {
                     String text = voiceInput.takeResult();
-                    if (text.length() > 0) {
-                        chat.setInput(text);
-                    }
+                    if (text.length() > 0) chat.setInput(text);
                 }
+                didBlock = true;
             }
-            fnHeld = fnAlone;
 
             // Auto-stop at max duration
-            if (voiceInput.isRecording()
-                && voiceInput.getRecordingDuration() >= 10.0f) {
+            if (!didBlock && voiceInput.isRecording()
+                && voiceInput.getRecordingDuration() >= 5.0f) {
                 chat.update(canvas);
                 voiceInput.drawTranscribingBar(canvas);
                 canvas.pushSprite(0, 0);
-
                 if (voiceInput.stopRecording()) {
                     String text = voiceInput.takeResult();
-                    if (text.length() > 0) {
-                        chat.setInput(text);
-                    }
+                    if (text.length() > 0) chat.setInput(text);
                 }
-                fnHeld = false;
+                didBlock = true;
             }
 
+            // Resync keyboard after blocking STT call
+            if (didBlock) {
+                M5Cardputer.update();
+                ks = M5Cardputer.Keyboard.keysState();
+            }
+
+            // Compute edges for regular keys (suppressed on blocking frame)
+            bool enterDown = !didBlock && ks.enter && !pEnter;
+            bool delDown   = !didBlock && ks.del && !pDel;
+            bool tabDown   = !didBlock && ks.tab && !pTab;
+            char curWordChar = (ks.word.size() > 0) ? ks.word[0] : 0;
+            bool charDown  = !didBlock && curWordChar != 0 && curWordChar != pWordChar;
+
+            // Save baseline for next frame
+            pFn = ks.fn; pEnter = ks.enter; pDel = ks.del; pTab = ks.tab;
+            pWordChar = curWordChar;
+
             // ── Normal keyboard input ──
-            if (keyPressed && !voiceInput.isRecording()) {
-                if (keys.tab) {
+            if (!voiceInput.isRecording()) {
+                if (tabDown) {
                     playTransition(canvas, false);
                     enterCompanionMode();
                     break;
                 }
-                if (keys.enter) {
-                    Serial.println("[CHAT] Enter pressed");
+                if (enterDown) {
                     chat.handleEnter();
-                } else if (keys.del) {
+                } else if (delDown) {
                     chat.handleBackspace();
-                } else if (keys.word.size() > 0) {
-                    char key = keys.word[0];
-                    if (keys.fn && key == ';') {
+                } else if (charDown) {
+                    char key = ks.word[0];
+                    if (ks.fn && key == ';') {
                         chat.scrollUp();
-                    } else if (keys.fn && key == '/') {
+                    } else if (ks.fn && key == '/') {
                         chat.scrollDown();
-                    } else if (!keys.fn) {
-                        // Only type if Fn is not held (avoid typing during voice)
-                        Serial.printf("[CHAT] Key: %c\n", key);
+                    } else if (!ks.fn) {
                         chat.handleKey(key);
                     }
                 }
@@ -204,13 +215,19 @@ void loop() {
             // Check if chat has a message to send
             if (chat.hasPendingMessage() && !aiClient.isBusy()) {
                 String msg = chat.takePendingMessage();
-                Serial.println("[CHAT] Sending to AI: " + msg);
+                Serial.printf("[CHAT] Sending: %s\n", msg.c_str());
                 companion.triggerTalk();
 
                 aiClient.sendMessage(msg,
                     // onToken
                     [](const String& token) {
                         chat.appendAIToken(token);
+                        // Typing sound — short chirp, throttled
+                        static unsigned long lastBeep = 0;
+                        if (millis() - lastBeep > 80) {
+                            M5Cardputer.Speaker.tone(1800, 15);
+                            lastBeep = millis();
+                        }
                         // Redraw while streaming
                         chat.update(canvas);
                         canvas.pushSprite(0, 0);
@@ -279,11 +296,15 @@ void updateSetupMode() {
         case SetupStep::PASSWORD:
             canvas.drawString("WiFi Password:", 10, 35);
             canvas.setTextColor(Color::WHITE);
-            // Show asterisks for password
+            // Show asterisks for password — stack buffer, no heap allocation
             {
-                String masked;
-                for (unsigned int i = 0; i < setupInput.length(); i++) masked += '*';
-                canvas.drawString((masked + "_").c_str(), 10, 50);
+                char masked[64];
+                int len = setupInput.length();
+                if (len > 62) len = 62;
+                memset(masked, '*', len);
+                masked[len] = '_';
+                masked[len + 1] = '\0';
+                canvas.drawString(masked, 10, 50);
             }
             canvas.setTextColor(Color::STATUS_DIM);
             canvas.drawString("[Enter] confirm", 10, 75);
@@ -308,9 +329,8 @@ void updateSetupMode() {
             canvas.drawString("Connecting to WiFi...", 50, 55);
             {
                 static int dots = 0;
-                String d;
-                for (int i = 0; i < (dots % 4); i++) d += ".";
-                canvas.drawString(d.c_str(), 170, 55);
+                static const char* dotStr[] = {"", ".", "..", "..."};
+                canvas.drawString(dotStr[dots % 4], 170, 55);
                 dots++;
             }
             break;
@@ -372,8 +392,8 @@ void connectWiFi() {
         canvas.fillScreen(Color::BG_DAY);
         canvas.setTextColor(Color::CLOCK_TEXT);
         canvas.setTextSize(1);
-        String msg = "Connecting" + String("....").substring(0, (attempts % 4) + 1);
-        canvas.drawString(msg.c_str(), 70, 55);
+        static const char* dots[] = {"Connecting.", "Connecting..", "Connecting...", "Connecting...."};
+        canvas.drawString(dots[attempts % 4], 70, 55);
         canvas.pushSprite(0, 0);
     }
 

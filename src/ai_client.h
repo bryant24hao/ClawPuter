@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include <functional>
+#include <ArduinoJson.h>
 
 class AIClient {
 public:
@@ -27,7 +28,7 @@ private:
     bool busy = false;
 
     // Conversation history (keep last N exchanges for context)
-    static constexpr int MAX_HISTORY = 6;
+    static constexpr int MAX_HISTORY = 2;
     struct Exchange {
         String user;
         String assistant;
@@ -36,5 +37,6 @@ private:
     int historyCount = 0;
 
     void addToHistory(const String& user, const String& assistant);
-    String buildRequestBody(const String& userMessage);
+    // Build JSON request body into doc. Caller uses measureJson/serializeJson.
+    void buildRequestDoc(const String& userMessage, JsonDocument& doc);
 };

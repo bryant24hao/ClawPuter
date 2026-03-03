@@ -1,4 +1,55 @@
 #include "chat.h"
+#include <cstring>
+
+// ── UTF-8 safe line-break helper ──
+// Given text starting at `start`, find how many bytes fit within maxW pixels.
+// Returns byte count, ensuring we don't split a multi-byte UTF-8 character.
+static int fitBytes(M5Canvas& canvas, const char* start, int len, int maxW, char* buf, int bufSize) {
+    if (len == 0) return 0;
+
+    // Try full length first (common case: line fits)
+    int tryLen = (len < bufSize - 1) ? len : bufSize - 1;
+    memcpy(buf, start, tryLen);
+    buf[tryLen] = '\0';
+    if (canvas.textWidth(buf) <= maxW) return tryLen;
+
+    // Binary search for the max fitting length
+    int lo = 1, hi = tryLen;
+    int best = 1;
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2;
+        memcpy(buf, start, mid);
+        buf[mid] = '\0';
+        if (canvas.textWidth(buf) <= maxW) {
+            best = mid;
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+
+    // Don't split a UTF-8 multi-byte character: back up if we landed on a continuation byte
+    while (best > 0 && (start[best] & 0xC0) == 0x80) {
+        best--;
+    }
+    if (best == 0) best = 1; // always advance at least 1 byte
+
+    return best;
+}
+
+// Count wrapped lines for an AI message — zero heap allocation
+static int countWrappedLines(M5Canvas& canvas, const char* text, int maxW, char* buf, int bufSize) {
+    int len = strlen(text);
+    if (len == 0) return 1;
+    int pos = 0;
+    int lines = 0;
+    while (pos < len) {
+        int fit = fitBytes(canvas, text + pos, len - pos, maxW, buf, bufSize);
+        pos += fit;
+        lines++;
+    }
+    return lines;
+}
 
 void Chat::begin(M5Canvas& canvas) {
     if (!initialized) {
@@ -8,17 +59,19 @@ void Chat::begin(M5Canvas& canvas) {
         waitingForAI = false;
         initialized = true;
     }
-    // Recalculate and scroll to bottom
+    canvas.setFont(&fonts::efontCN_12);
+    canvas.setTextSize(1);
     totalContentH = calcTotalHeight(canvas);
     scrollToBottom();
 }
 
 void Chat::update(M5Canvas& canvas) {
     canvas.fillScreen(Color::BG_DAY);
+    canvas.setFont(&fonts::efontCN_12);
+    canvas.setTextSize(1);
 
     // Header
     canvas.setTextColor(Color::CLOCK_TEXT);
-    canvas.setTextSize(1);
     canvas.drawString("[TAB]back [;/]scroll [Fn]voice", 4, 2);
     canvas.drawFastHLine(0, MSG_AREA_Y - 1, SCREEN_W, Color::GROUND_TOP);
 
@@ -53,7 +106,7 @@ void Chat::handleBackspace() {
 }
 
 void Chat::scrollUp() {
-    scrollY -= MSG_AREA_H / 2;  // half page
+    scrollY -= MSG_AREA_H / 2;
     if (scrollY < 0) scrollY = 0;
     userScrolled = true;
 }
@@ -63,7 +116,6 @@ void Chat::scrollDown() {
     int maxScroll = totalContentH - MSG_AREA_H;
     if (maxScroll < 0) maxScroll = 0;
     if (scrollY > maxScroll) scrollY = maxScroll;
-    // If we're at bottom, clear manual scroll flag
     if (scrollY >= maxScroll) userScrolled = false;
 }
 
@@ -97,28 +149,27 @@ void Chat::setInput(const String& text) {
 
 void Chat::addMessage(const String& text, bool isUser) {
     int idx = messageCount % MAX_MESSAGES;
-    messages[idx].text = text;
     messages[idx].isUser = isUser;
+    if (!isUser) {
+        // AI messages grow via streaming — pre-reserve to avoid realloc
+        messages[idx].text = "";
+        messages[idx].text.reserve(320);
+        messages[idx].text = text;
+    } else {
+        messages[idx].text = text;
+    }
     messageCount++;
     if (!userScrolled) scrollToBottom();
 }
 
+// ── Zero-heap-allocation message height/drawing ──
+// Shared stack buffer for textWidth measurement (avoids per-call allocation)
+
 int Chat::calcMessageHeight(M5Canvas& canvas, const Message& msg) {
-    if (msg.isUser) {
-        return LINE_H;
-    }
-    // AI messages may wrap
-    String text = msg.text;
-    int lines = 1;
-    while (text.length() > 0) {
-        int fitLen = text.length();
-        while (fitLen > 0 && canvas.textWidth(text.substring(0, fitLen).c_str()) > MAX_W) {
-            fitLen--;
-        }
-        if (fitLen == 0) fitLen = 1;
-        text = text.substring(fitLen);
-        if (text.length() > 0) lines++;
-    }
+    if (msg.isUser) return LINE_H;
+
+    char buf[64]; // stack buffer for textWidth measurement
+    int lines = countWrappedLines(canvas, msg.text.c_str(), MAX_W, buf, sizeof(buf));
     return lines * LINE_H;
 }
 
@@ -135,7 +186,6 @@ int Chat::calcTotalHeight(M5Canvas& canvas) {
 }
 
 void Chat::scrollToBottom() {
-    // Will be called with canvas context from update/begin
     int maxScroll = totalContentH - MSG_AREA_H;
     if (maxScroll < 0) maxScroll = 0;
     scrollY = maxScroll;
@@ -154,10 +204,10 @@ void Chat::drawMessages(M5Canvas& canvas) {
     if (maxScroll < 0) maxScroll = 0;
     if (scrollY > maxScroll) scrollY = maxScroll;
     if (scrollY < 0) scrollY = 0;
-    // Auto-scroll if not manually scrolled
     if (!userScrolled) scrollY = maxScroll;
 
-    // Draw with virtual Y offset
+    // Stack buffer shared across all line measurements (zero heap allocation)
+    char buf[64];
     int y = MSG_AREA_Y + 2 - scrollY;
 
     for (int i = 0; i < total; i++) {
@@ -165,7 +215,6 @@ void Chat::drawMessages(M5Canvas& canvas) {
         Message& msg = messages[idx];
 
         if (msg.isUser) {
-            // User message - right aligned, blue
             if (y >= MSG_AREA_Y - LINE_H && y < SCREEN_H - INPUT_BAR_H) {
                 canvas.setTextColor(Color::CHAT_USER);
                 int tw = canvas.textWidth(msg.text.c_str());
@@ -176,28 +225,31 @@ void Chat::drawMessages(M5Canvas& canvas) {
             }
             y += LINE_H;
         } else {
-            // AI message - left aligned, green, word wrap
+            // AI message — word wrap using pointer arithmetic, zero heap allocation
             canvas.setTextColor(Color::CHAT_AI);
-            String text = msg.text;
-            while (text.length() > 0) {
-                int fitLen = text.length();
-                while (fitLen > 0 && canvas.textWidth(text.substring(0, fitLen).c_str()) > MAX_W) {
-                    fitLen--;
-                }
-                if (fitLen == 0) fitLen = 1;
+            const char* text = msg.text.c_str();
+            int len = msg.text.length();
+            int pos = 0;
+
+            while (pos < len) {
+                int fit = fitBytes(canvas, text + pos, len - pos, MAX_W, buf, sizeof(buf));
 
                 if (y >= MSG_AREA_Y - LINE_H && y < SCREEN_H - INPUT_BAR_H) {
-                    String line = text.substring(0, fitLen);
-                    canvas.drawString(line.c_str(), 6, y);
+                    memcpy(buf, text + pos, fit);
+                    buf[fit] = '\0';
+                    canvas.drawString(buf, 6, y);
                 }
-                text = text.substring(fitLen);
+
+                pos += fit;
                 y += LINE_H;
             }
+            // Empty message still takes one line
+            if (len == 0) y += LINE_H;
         }
     }
 
     // Scroll indicator
-    if (totalContentH > MSG_AREA_H) {
+    if (totalContentH > MSG_AREA_H && maxScroll > 0) {
         int barH = max(8, MSG_AREA_H * MSG_AREA_H / totalContentH);
         int barY = MSG_AREA_Y + (scrollY * (MSG_AREA_H - barH)) / maxScroll;
         canvas.fillRect(SCREEN_W - 2, barY, 2, barH, Color::STATUS_DIM);
@@ -216,13 +268,23 @@ void Chat::drawInputBar(M5Canvas& canvas) {
         canvas.setTextColor(Color::STATUS_DIM);
         canvas.drawString("waiting...", 4, barY + 4);
     } else {
-        // Show input with cursor
-        String display = "> " + inputBuffer + "_";
+        // Show input with cursor — use snprintf to avoid String concatenation
+        char display[128];
+        snprintf(display, sizeof(display), "> %s_", inputBuffer.c_str());
         // Truncate from left if too long
-        int maxW = SCREEN_W - 8;
-        while (canvas.textWidth(display.c_str()) > maxW && display.length() > 2) {
-            display = "> " + display.substring(3);
+        const char* p = display;
+        while (canvas.textWidth(p) > SCREEN_W - 8 && strlen(p) > 4) {
+            p += 1; // skip one byte forward
+            // Skip UTF-8 continuation bytes
+            while ((*p & 0xC0) == 0x80) p++;
         }
-        canvas.drawString(display.c_str(), 4, barY + 4);
+        if (p != display) {
+            // We truncated — show with ">" prefix
+            char truncated[128];
+            snprintf(truncated, sizeof(truncated), "> %s", p);
+            canvas.drawString(truncated, 4, barY + 4);
+        } else {
+            canvas.drawString(display, 4, barY + 4);
+        }
     }
 }

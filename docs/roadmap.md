@@ -7,13 +7,17 @@
 - [x] 日夜背景 — 根据 NTP 时间切白天/傍晚/夜晚
 - [x] 角色自发动作 — 伸懒腰、东张西望
 - [x] 音效 — 按键咔嗒、开心音阶、AI 回复提示音
+- [x] SSE 流式响应 — 逐 token 显示 AI 回复，零堆分配 chunked transfer 解析
+- [x] 语音输入 — Fn 按住说话，Groq Whisper STT 转文字，本地代理中转
+- [x] 桌面宠物同步 — macOS 端 Swift 桌面宠物，通过 UDP 接收 Cardputer 状态
+- [x] OpenClaw 集成 — 局域网连接 OpenClaw Gateway，多模型自动切换
 
 ## Phase 5：体验打磨
 
+- [ ] TTS 语音回复 — AI 回复通过扬声器播放
 - [ ] 电量显示 — 屏幕角落电池百分比，低电量角色变虚弱
 - [ ] 亮度自动调节 — 夜间自动降亮度
 - [ ] 聊天历史持久化 — 存 NVS 或 SD 卡，重启后保留上次对话
-- [ ] 流式响应 — 重新启用 SSE 逐字显示
 
 ## Phase 6：互动玩法
 
@@ -29,6 +33,4 @@
 
 ## Phase 8：硬核扩展
 
-- [ ] 多模型切换 — Fn+1/2/3 切换 Kimi/Claude/Gemini
 - [ ] BLE 联动 — 手机推送通知到 Cardputer，角色举牌提示
-- [ ] OpenClaw 集成 — 作为 OpenClaw Agent 的物理伴侣设备（待调研）

@@ -159,18 +159,19 @@ main.cpp:
 
 ## API 客户端
 
-### 当前配置（Kimi K2.5）
+### 当前配置（OpenClaw Gateway）
 
-- Endpoint: `https://api.moonshot.cn/v1/chat/completions`
-- 非流式请求，同步阻塞
-- max_tokens: 1024
-- 会话历史：内存中保留最近 6 轮对话
+- Endpoint: `http://{OPENCLAW_HOST}:{OPENCLAW_PORT}/v1/chat/completions`
+- SSE 流式请求（chunked transfer encoding），逐 token 回调显示
+- 会话历史：内存中保留最近 2 轮对话
+- 认证：`Authorization: Bearer {OPENCLAW_TOKEN}`
 
-### 响应解析（含 thinking mode fallback）
+### 响应解析（零堆分配 SSE 解析）
 
 ```cpp
-const char* text = doc["choices"][0]["message"]["content"];
-if (!text || strlen(text) == 0) {
-    text = doc["choices"][0]["message"]["reasoning_content"];  // fallback
-}
+// 栈上 char[] 缓冲，直接字符串搜索 "content":"..."，无 JsonDocument
+char contentBuf[128];
+const char* key = strstr(json, "\"content\":\"");
+// ... 手动提取内容，处理 JSON 转义
+if (onToken) onToken(filteredBuf);  // const char* 回调，无临时 String
 ```

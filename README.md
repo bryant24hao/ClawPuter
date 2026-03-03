@@ -2,26 +2,36 @@
 
 [中文](README_CN.md)
 
-A pixel-art desktop companion running on M5Stack Cardputer (ESP32-S3). Features an OpenClaw-themed lobster character with animations, day/night clock, and AI chat — powered by [OpenClaw](https://github.com/openclaw/openclaw).
+A pixel-art desktop companion running on M5Stack Cardputer (ESP32-S3). Features an OpenClaw-themed lobster character with animations, day/night clock, AI chat with voice input, and a synced macOS desktop pet.
 
 ## Features
 
 - **Companion Mode** — Pixel lobster with idle, happy, sleep, talk, stretch, and look-around animations. Day/night background with stars and moon. NTP clock display.
-- **Chat Mode** — Full keyboard input, AI conversation via OpenClaw Gateway (OpenAI-compatible API), scrollable message history with word-wrap.
+- **Chat Mode** — Full keyboard input, AI conversation with SSE streaming (token-by-token display), scrollable message history with word-wrap.
+- **Voice Input** — Push-to-talk via Fn key, speech-to-text via Groq Whisper API (through a local proxy server).
+- **Desktop Pet Sync** — macOS companion app receives lobster state over UDP, rendering a synced desktop pet on your Mac.
 - **OpenClaw Integration** — Connects to your local OpenClaw Gateway over LAN. Multi-model fallback (Kimi/Claude/GPT/Gemini), persistent memory, 5400+ community skills.
 - **Boot Animation** — Lobster pixel-art line-by-line reveal with pixel wipe transitions between modes.
-- **Sound Effects** — Key clicks, happy melody, notification tones via built-in speaker.
+- **Sound Effects** — Key clicks, happy melody, typing chirps during AI streaming, notification tones.
 
 ## Quick Start
 
 ### 1. Set Environment Variables
 
 ```bash
-export WIFI_SSID="your_wifi_name"
-export WIFI_PASS="your_wifi_password"
-export OPENCLAW_HOST="<your-host-ip>"       # your Mac/VPS LAN IP
+# WiFi
+export WIFI_SSID="<your-wifi-ssid>"
+export WIFI_PASS="<your-wifi-password>"
+
+# AI Backend (OpenClaw Gateway)
+export OPENCLAW_HOST="<your-host-ip>"       # OpenClaw Gateway LAN IP
 export OPENCLAW_PORT="<your-port>"           # Gateway port
 export OPENCLAW_TOKEN="<your-gateway-token>"
+
+# Voice Input (optional, for stt_proxy.py)
+export GROQ_API_KEY="<your-groq-api-key>"    # Used by tools/stt_proxy.py, not the firmware
+export STT_PROXY_HOST="<your-host-ip>"       # Machine running stt_proxy.py
+export STT_PROXY_PORT="8090"                 # STT proxy port (default 8090)
 ```
 
 ### 2. Build & Flash
@@ -32,7 +42,15 @@ pio run -t upload
 
 First-time flashing may require download mode: hold **G0** + press **Reset**, then release G0. See [Setup Guide](docs/setup-and-flash.md) for details.
 
-### 3. Serial Debug
+### 3. Start STT Proxy (for voice input)
+
+```bash
+python3 tools/stt_proxy.py
+```
+
+The proxy runs on your Mac/PC, relays audio from the Cardputer to Groq Whisper API, and returns transcriptions. Requires `GROQ_API_KEY` in your `.env` or environment.
+
+### 4. Serial Debug
 
 ```bash
 pio device monitor
@@ -45,6 +63,7 @@ pio device monitor
 | TAB | Switch to chat | Switch to companion |
 | Space / Enter | Happy animation | Send message |
 | Backspace | — | Delete character |
+| Fn (hold) | — | Push-to-talk voice input |
 | Fn + ; | — | Scroll up |
 | Fn + / | — | Scroll down |
 | Fn + R | Reset config | — |
@@ -54,13 +73,21 @@ pio device monitor
 
 ```
 src/
-├── main.cpp          # Entry point, mode dispatch, WiFi/NTP
-├── companion.h/cpp   # Companion mode: animations, state machine, clock
-├── chat.h/cpp        # Chat mode: messages, input bar, scrolling
-├── ai_client.h/cpp   # OpenClaw Gateway client (OpenAI-compatible)
-├── sprites.h         # Pixel lobster sprites (RGB565)
-├── config.h/cpp      # WiFi/API config, NVS persistence
-└── utils.h           # Colors, screen constants, Timer
+├── main.cpp              # Entry point, mode dispatch, WiFi/NTP
+├── companion.h/cpp       # Companion mode: animations, state machine, clock
+├── chat.h/cpp            # Chat mode: messages, input bar, scrolling
+├── ai_client.h/cpp       # AI client (OpenClaw/Claude), SSE streaming
+├── voice_input.h/cpp     # Push-to-talk recording, WAV encoding, STT proxy client
+├── state_broadcast.h/cpp # UDP state broadcast for desktop pet sync
+├── sprites.h             # Pixel lobster sprites (RGB565)
+├── config.h/cpp          # WiFi/API config, NVS persistence
+└── utils.h               # Colors, screen constants, Timer
+
+desktop/
+└── CardputerDesktopPet/  # macOS desktop pet (Swift, receives UDP state)
+
+tools/
+└── stt_proxy.py          # Local HTTP proxy: ESP32 audio → Groq Whisper API
 ```
 
 ## Hardware
@@ -98,14 +125,21 @@ See [OpenClaw Research](docs/openclaw-research.md) for the full integration guid
 - [API Integration Story](docs/api-integration.md)
 - [Architecture](docs/architecture.md)
 - [OpenClaw Integration](docs/openclaw-research.md)
+- [Voice Input Design](docs/voice-input-design.md)
+- [Desktop Pet Design](docs/desktop-pet-design.md)
+- [UDP State Sync Design](docs/udp-state-sync-design.md)
+- [ESP32 Memory Lessons](docs/esp32-voice-chat-lessons.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Roadmap](docs/roadmap.md)
 
 ## Roadmap
 
+- [x] Streaming responses (SSE token-by-token display)
+- [x] Voice input (push-to-talk + Groq Whisper STT)
+- [x] Desktop pet sync (macOS companion via UDP)
+- [ ] TTS voice replies (AI speaks through speaker)
 - [ ] Battery display with low-power character animation
 - [ ] Chat history persistence (NVS/SD card)
-- [ ] Streaming responses (SSE)
 - [ ] Pet system (hunger/mood mechanics)
 - [ ] Pomodoro timer
 - [ ] Weather display

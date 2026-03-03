@@ -20,12 +20,13 @@
 
 ### STT 服务
 
-复用 OpenClaw Gateway 现有的 LAN 基础设施，调用 OpenAI Whisper 兼容的 `/v1/audio/transcriptions` 端点。
+通过本地 STT 代理 (`tools/stt_proxy.py`) 转发到 Groq Whisper API。ESP32 通过 HTTP 明文连局域网代理，代理负责 HTTPS 转发和 API 认证。
 
 - 音频格式：PCM 16-bit signed, 16kHz, mono
 - 传输格式：HTTP multipart/form-data，附带 WAV header
-- 端点：`http://{OPENCLAW_HOST}:{OPENCLAW_PORT}/v1/audio/transcriptions`
-- 认证：同 chat 的 Bearer token
+- 端点：`http://{STT_PROXY_HOST}:{STT_PROXY_PORT}/v1/audio/transcriptions`
+- 模型：`whisper-large-v3-turbo`（Groq 托管）
+- 认证：代理端配置 `GROQ_API_KEY`，ESP32 侧无需认证
 
 ### 录音参数
 
@@ -34,11 +35,11 @@
 | 采样率 | 16,000 Hz | Whisper 原生采样率 |
 | 位深 | 16-bit signed | PCM |
 | 声道 | mono | |
-| 最大录音时长 | 10 秒 | 16000 × 2 × 10 = 320KB |
+| 最大录音时长 | 3 秒 | 16000 × 2 × 3 = 96KB（原设计 10 秒，因堆碎片化缩减） |
 | 增益 | magnification = 64 | PDM 麦克风增益补偿 |
 | 降噪 | noise_filter_level = 64 | IIR 降噪 |
 
-内存分配：使用 `heap_caps_malloc(MALLOC_CAP_8BIT)` 分配录音 buffer，内部 SRAM 约 320KB 可用。
+内存分配：`begin()` 时使用 `heap_caps_malloc(MALLOC_CAP_SPIRAM)` 一次分配 96KB 录音 buffer 并永久持有（PSRAM 优先，fallback 内部 SRAM）。启动时堆最完整，释放后再分配会因 WiFi 栈碎片化失败。详见 [ESP32 内存踩坑记录](esp32-voice-chat-lessons.md)。
 
 ### UX 流程
 
@@ -51,7 +52,7 @@ CHAT 模式下:
    → 屏幕底部显示 "🎤 Recording..." + 计时
    → 持续录音到 buffer
 
-2. 用户松开 Fn 键（或录满 10 秒自动停止）
+2. 用户松开 Fn 键（或录满 3 秒自动停止）
    → 停止麦克风 (Mic.end)
    → 恢复扬声器 (Speaker.begin)
    → 屏幕显示 "Transcribing..."
@@ -122,7 +123,7 @@ private:
     String result;
 
     static constexpr uint32_t SAMPLE_RATE = 16000;
-    static constexpr float MAX_RECORD_SECONDS = 10.0f;
+    static constexpr float MAX_RECORD_SECONDS = 3.0f;  // 原设计 10s，因堆碎片化缩减
     static constexpr float MIN_RECORD_SECONDS = 0.3f;
 
     void initMic();
@@ -135,7 +136,7 @@ private:
 ### 新建：`src/voice_input.cpp`
 
 实现：
-- `begin()`: 分配录音 buffer（PSRAM 优先，fallback 内部 SRAM）
+- `begin()`: 一次分配 96KB 录音 buffer 并永久持有（启动时堆最完整，避免后续碎片化导致重分配失败）
 - `startRecording()`: Speaker.end → Mic.begin → 开始录音
 - `stopRecording()`: Mic.end → Speaker.begin → 如果时长够 → 调 STT
 - `sendToSTT()`: 构造 multipart/form-data 请求，POST 到 gateway
@@ -220,20 +221,19 @@ Offset  Size  Field           Value
 
 ```
 POST /v1/audio/transcriptions HTTP/1.1
-Host: {OPENCLAW_HOST}:{OPENCLAW_PORT}
-Authorization: Bearer {OPENCLAW_TOKEN}
-Content-Type: multipart/form-data; boundary=----AudioBoundary
+Host: {STT_PROXY_HOST}:{STT_PROXY_PORT}
+Content-Type: multipart/form-data; boundary=----VoiceBoundary1234
 
-------AudioBoundary
+------VoiceBoundary1234
 Content-Disposition: form-data; name="file"; filename="recording.wav"
 Content-Type: audio/wav
 
 {WAV binary data}
-------AudioBoundary
+------VoiceBoundary1234
 Content-Disposition: form-data; name="model"
 
-whisper-1
-------AudioBoundary--
+whisper-large-v3-turbo
+------VoiceBoundary1234--
 ```
 
 响应：
@@ -258,5 +258,5 @@ M5Cardputer 的 Keyboard 类通过 `keysState()` 获取按键状态。`keys.fn` 
 1. **麦克风测试**: 录音 → Serial 打印 buffer 中的采样值，确认非零
 2. **WAV 生成测试**: 将 WAV 数据 POST 到 Mac 上的测试服务器，播放验证
 3. **端到端**: Fn 长按说话 → 松开 → 文字出现在输入框 → Enter 发送
-4. **边界测试**: 录音 < 0.3 秒忽略、录满 10 秒自动停止、网络失败恢复
+4. **边界测试**: 录音 < 0.3 秒忽略、录满 3 秒自动停止、网络失败恢复
 5. **Speaker/Mic 切换**: 录音后扬声器恢复正常（AI 回复后的提示音能响）

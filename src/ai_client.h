@@ -11,7 +11,7 @@ public:
 
     void begin(const String& apiKey);
 
-    // Send message to Claude API with streaming.
+    // Send message to OpenClaw gateway with SSE streaming.
     // Calls onToken for each text token, onDone when complete, onError on failure.
     void sendMessage(const String& userMessage,
                      TokenCallback onToken,

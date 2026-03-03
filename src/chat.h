@@ -19,12 +19,16 @@ public:
     bool hasPendingMessage() const { return pendingMessage.length() > 0; }
     String takePendingMessage();
 
+    // Set input buffer (for voice input results)
+    void setInput(const String& text);
+    const String& getInput() const { return inputBuffer; }
+
 private:
     static constexpr int MAX_MESSAGES = 20;
     static constexpr int INPUT_BAR_H = 16;
-    static constexpr int MSG_AREA_Y = 12;
+    static constexpr int MSG_AREA_Y = 16;
     static constexpr int MSG_AREA_H = SCREEN_H - INPUT_BAR_H - MSG_AREA_Y;
-    static constexpr int LINE_H = 12;
+    static constexpr int LINE_H = 14;
     static constexpr int MAX_W = SCREEN_W - 12;
 
     struct Message {

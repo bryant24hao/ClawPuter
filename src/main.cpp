@@ -7,12 +7,14 @@
 #include "chat.h"
 #include "ai_client.h"
 #include "state_broadcast.h"
+#include "voice_input.h"
 
 // ── Globals ──
 M5Canvas canvas(&M5Cardputer.Display);
 Companion companion;
 Chat chat;
 AIClient aiClient;
+VoiceInput voiceInput;
 
 enum class AppMode { SETUP, COMPANION, CHAT };
 static AppMode appMode = AppMode::SETUP;
@@ -127,26 +129,84 @@ void loop() {
             canvas.pushSprite(0, 0);
             break;
 
-        case AppMode::CHAT:
-            if (keyPressed) {
-                if (keys.tab) {
+        case AppMode::CHAT: {
+            // ── Keyboard state via keysState() + manual edge detection ──
+            // We bypass isChange() which fails after blocking STT calls.
+            // keysState() always returns fresh data — proven reliable in all rounds.
+            auto ks = M5Cardputer.Keyboard.keysState();
+            static bool pFn = false, pEnter = false, pDel = false, pTab = false;
+            static char pWordChar = 0;
+            bool didBlock = false;
+
+            bool fnDown = ks.fn && !pFn;
+            bool fnUp = !ks.fn && pFn;
+            bool fnAlone = ks.fn && ks.word.size() == 0
+                           && !ks.tab && !ks.enter && !ks.del;
+
+            // ── Voice input: Fn push-to-talk ──
+            if (fnDown && fnAlone && !voiceInput.isRecording()
+                && !aiClient.isBusy() && !voiceInput.isTranscribing()) {
+                voiceInput.startRecording();
+            }
+            if (fnUp && voiceInput.isRecording()) {
+                chat.update(canvas);
+                voiceInput.drawTranscribingBar(canvas);
+                canvas.pushSprite(0, 0);
+                if (voiceInput.stopRecording()) {
+                    String text = voiceInput.takeResult();
+                    if (text.length() > 0) chat.setInput(text);
+                }
+                didBlock = true;
+            }
+
+            // Auto-stop at max duration
+            if (!didBlock && voiceInput.isRecording()
+                && voiceInput.getRecordingDuration() >= 5.0f) {
+                chat.update(canvas);
+                voiceInput.drawTranscribingBar(canvas);
+                canvas.pushSprite(0, 0);
+                if (voiceInput.stopRecording()) {
+                    String text = voiceInput.takeResult();
+                    if (text.length() > 0) chat.setInput(text);
+                }
+                didBlock = true;
+            }
+
+            // Resync keyboard after blocking STT call
+            if (didBlock) {
+                M5Cardputer.update();
+                ks = M5Cardputer.Keyboard.keysState();
+            }
+
+            // Compute edges for regular keys (suppressed on blocking frame)
+            bool enterDown = !didBlock && ks.enter && !pEnter;
+            bool delDown   = !didBlock && ks.del && !pDel;
+            bool tabDown   = !didBlock && ks.tab && !pTab;
+            char curWordChar = (ks.word.size() > 0) ? ks.word[0] : 0;
+            bool charDown  = !didBlock && curWordChar != 0 && curWordChar != pWordChar;
+
+            // Save baseline for next frame
+            pFn = ks.fn; pEnter = ks.enter; pDel = ks.del; pTab = ks.tab;
+            pWordChar = curWordChar;
+
+            // ── Normal keyboard input ──
+            if (!voiceInput.isRecording()) {
+                if (tabDown) {
                     playTransition(canvas, false);
                     enterCompanionMode();
                     break;
                 }
-                if (keys.enter) {
-                    Serial.println("[CHAT] Enter pressed");
+                if (enterDown) {
                     chat.handleEnter();
-                } else if (keys.del) {
+                } else if (delDown) {
                     chat.handleBackspace();
-                } else if (keys.word.size() > 0) {
-                    char key = keys.word[0];
-                    if (keys.fn && key == ';') {
+                } else if (charDown) {
+                    char key = ks.word[0];
+                    if (ks.fn && key == ';') {
                         chat.scrollUp();
-                    } else if (keys.fn && key == '/') {
+                    } else if (ks.fn && key == '/') {
                         chat.scrollDown();
-                    } else {
-                        Serial.printf("[CHAT] Key: %c\n", key);
+                    } else if (!ks.fn) {
                         chat.handleKey(key);
                     }
                 }
@@ -155,13 +215,19 @@ void loop() {
             // Check if chat has a message to send
             if (chat.hasPendingMessage() && !aiClient.isBusy()) {
                 String msg = chat.takePendingMessage();
-                Serial.println("[CHAT] Sending to AI: " + msg);
+                Serial.printf("[CHAT] Sending: %s\n", msg.c_str());
                 companion.triggerTalk();
 
                 aiClient.sendMessage(msg,
                     // onToken
                     [](const String& token) {
                         chat.appendAIToken(token);
+                        // Typing sound — short chirp, throttled
+                        static unsigned long lastBeep = 0;
+                        if (millis() - lastBeep > 80) {
+                            M5Cardputer.Speaker.tone(1800, 15);
+                            lastBeep = millis();
+                        }
                         // Redraw while streaming
                         chat.update(canvas);
                         canvas.pushSprite(0, 0);
@@ -180,9 +246,15 @@ void loop() {
                 );
             }
 
+            // ── Draw ──
             chat.update(canvas);
+            // Override input bar if recording or transcribing
+            if (voiceInput.isRecording()) {
+                voiceInput.drawRecordingBar(canvas);
+            }
             canvas.pushSprite(0, 0);
             break;
+        }
     }
 
     // Broadcast state over UDP for desktop sync
@@ -224,11 +296,15 @@ void updateSetupMode() {
         case SetupStep::PASSWORD:
             canvas.drawString("WiFi Password:", 10, 35);
             canvas.setTextColor(Color::WHITE);
-            // Show asterisks for password
+            // Show asterisks for password — stack buffer, no heap allocation
             {
-                String masked;
-                for (unsigned int i = 0; i < setupInput.length(); i++) masked += '*';
-                canvas.drawString((masked + "_").c_str(), 10, 50);
+                char masked[64];
+                int len = setupInput.length();
+                if (len > 62) len = 62;
+                memset(masked, '*', len);
+                masked[len] = '_';
+                masked[len + 1] = '\0';
+                canvas.drawString(masked, 10, 50);
             }
             canvas.setTextColor(Color::STATUS_DIM);
             canvas.drawString("[Enter] confirm", 10, 75);
@@ -253,9 +329,8 @@ void updateSetupMode() {
             canvas.drawString("Connecting to WiFi...", 50, 55);
             {
                 static int dots = 0;
-                String d;
-                for (int i = 0; i < (dots % 4); i++) d += ".";
-                canvas.drawString(d.c_str(), 170, 55);
+                static const char* dotStr[] = {"", ".", "..", "..."};
+                canvas.drawString(dotStr[dots % 4], 170, 55);
                 dots++;
             }
             break;
@@ -317,8 +392,8 @@ void connectWiFi() {
         canvas.fillScreen(Color::BG_DAY);
         canvas.setTextColor(Color::CLOCK_TEXT);
         canvas.setTextSize(1);
-        String msg = "Connecting" + String("....").substring(0, (attempts % 4) + 1);
-        canvas.drawString(msg.c_str(), 70, 55);
+        static const char* dots[] = {"Connecting.", "Connecting..", "Connecting...", "Connecting...."};
+        canvas.drawString(dots[attempts % 4], 70, 55);
         canvas.pushSprite(0, 0);
     }
 
@@ -342,6 +417,9 @@ void connectWiFi() {
         if (Config::getApiKey().length() > 0) {
             aiClient.begin(Config::getApiKey());
         }
+
+        // Init voice input
+        voiceInput.begin();
 
         enterCompanionMode();
     } else {

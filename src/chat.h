@@ -12,8 +12,8 @@ public:
     void scrollUp();
     void scrollDown();
 
-    // Called when AI response token arrives
-    void appendAIToken(const String& token);
+    // Called when AI response token arrives (const char* to avoid heap allocation)
+    void appendAIToken(const char* token);
     void onAIResponseComplete();
 
     bool hasPendingMessage() const { return pendingMessage.length() > 0; }

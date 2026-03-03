@@ -10,12 +10,27 @@ enum SpriteRenderer {
         let h = SPRITE_H
         guard sprite.count == w * h else { return nil }
 
-        // Convert RGB565 → RGBA8888
-        var rgba = [UInt8](repeating: 0, count: w * h * 4)
+        // Create CGContext that manages its own pixel buffer
+        // (Passing &localArray as data: is UB — the pointer is only valid for the init call,
+        //  but makeImage() reads from it later. Release-mode optimizations can invalidate it.)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: nil,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: w * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ), let buffer = context.data else {
+            return nil
+        }
+
+        // Convert RGB565 → RGBA8888 directly into the context's buffer
+        let rgba = buffer.assumingMemoryBound(to: UInt8.self)
         for i in 0..<(w * h) {
             let pixel = sprite[i]
             if pixel == TRANSPARENT_COLOR {
-                // Fully transparent
                 rgba[i * 4 + 0] = 0
                 rgba[i * 4 + 1] = 0
                 rgba[i * 4 + 2] = 0
@@ -33,19 +48,7 @@ enum SpriteRenderer {
             }
         }
 
-        // Create CGImage from raw RGBA
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        guard let context = CGContext(
-            data: &rgba,
-            width: w,
-            height: h,
-            bitsPerComponent: 8,
-            bytesPerRow: w * 4,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ), let smallImage = context.makeImage() else {
-            return nil
-        }
+        guard let smallImage = context.makeImage() else { return nil }
 
         // Scale up with nearest-neighbor for pixel-perfect rendering
         let scaledW = w * scale

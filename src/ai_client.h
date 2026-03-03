@@ -5,7 +5,7 @@
 
 class AIClient {
 public:
-    using TokenCallback = std::function<void(const String& token)>;
+    using TokenCallback = std::function<void(const char* token)>;
     using DoneCallback = std::function<void()>;
     using ErrorCallback = std::function<void(const String& error)>;
 

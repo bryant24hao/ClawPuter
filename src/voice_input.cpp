@@ -10,11 +10,11 @@
 #endif
 
 void VoiceInput::begin() {
-    // Only compute size — buffer allocated on demand in startRecording()
-    // and freed after STT in stopRecording() to keep ~190KB free during chat.
     maxSamples = (size_t)(SAMPLE_RATE * MAX_RECORD_SEC);
-    Serial.printf("[VOICE] Ready (buffer will be %zu bytes on demand)\n",
-                  maxSamples * sizeof(int16_t));
+    // Allocate buffer once at startup and keep it permanently.
+    // Heap is least fragmented now; freeing and re-allocating later fails
+    // because WiFi/system allocations split the contiguous block.
+    allocBuffer();
 }
 
 bool VoiceInput::allocBuffer() {
@@ -30,7 +30,9 @@ bool VoiceInput::allocBuffer() {
         Serial.printf("[VOICE] Buffer allocated: %zu bytes, heap=%u\n", bytes, ESP.getFreeHeap());
         return true;
     }
-    Serial.printf("[VOICE] Buffer allocation failed! heap=%u\n", ESP.getFreeHeap());
+    Serial.printf("[VOICE] Buffer allocation failed! need=%zu heap=%u largest=%u\n",
+                  bytes, ESP.getFreeHeap(),
+                  heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     return false;
 }
 
@@ -64,10 +66,7 @@ void VoiceInput::deinitMic() {
 }
 
 void VoiceInput::startRecording() {
-    if (recording || maxSamples == 0) return;
-
-    // Allocate buffer on demand (freed after STT completes)
-    if (!allocBuffer()) return;
+    if (recording || maxSamples == 0 || !recordBuffer) return;
 
     samplesRecorded = 0;
     recording = true;
@@ -95,21 +94,17 @@ bool VoiceInput::stopRecording() {
 
     Serial.printf("[VOICE] Recorded %.1fs (%zu samples)\n", elapsed, samplesRecorded);
 
-    // Too short? Ignore — but still free buffer
+    // Too short? Ignore
     if (elapsed < MIN_RECORD_SEC) {
         Serial.println("[VOICE] Too short, ignoring");
-        freeBuffer();
         result = "";
         return false;
     }
 
-    // Send to STT — sendToSTT() frees the buffer internally after upload,
-    // so ~190KB is available while waiting for Whisper response.
+    // Send to STT — buffer stays allocated permanently (no free/realloc cycle)
     transcribing = true;
     result = sendToSTT(recordBuffer, samplesRecorded);
     transcribing = false;
-    // Ensure buffer is freed even if sendToSTT had an early exit
-    freeBuffer();
 
     if (result.length() > 0) {
         Serial.printf("[VOICE] STT result: %s\n", result.c_str());
@@ -240,10 +235,7 @@ String VoiceInput::sendToSTT(const int16_t* data, size_t sampleCount) {
 
     Serial.printf("[VOICE] Audio sent (%u bytes)\n", totalSize);
 
-    // ── Free 160KB buffer NOW — data is fully sent, buffer no longer needed ──
-    freeBuffer();
-
-    // ── Wait for response (~190KB free heap now) ──
+    // Buffer stays allocated permanently — no free/realloc fragmentation
     unsigned long deadline = millis() + 30000;
     while (!client.available() && client.connected() && millis() < deadline) {
         delay(10);
@@ -284,6 +276,18 @@ String VoiceInput::sendToSTT(const int16_t* data, size_t sampleCount) {
             lineLen = 0;
         } else if (lineLen < (int)sizeof(lineBuf) - 1) {
             lineBuf[lineLen++] = c;
+        }
+    }
+    // Process any remaining data in lineBuf (body may lack trailing \n)
+    if (headersDone && lineLen > 0) {
+        lineBuf[lineLen] = '\0';
+        if (lineLen > 0 && lineBuf[lineLen-1] == '\r') lineBuf[--lineLen] = '\0';
+        int copyLen = lineLen;
+        if (respLen + copyLen >= (int)sizeof(responseBuf) - 1)
+            copyLen = sizeof(responseBuf) - 1 - respLen;
+        if (copyLen > 0) {
+            memcpy(responseBuf + respLen, lineBuf, copyLen);
+            respLen += copyLen;
         }
     }
     responseBuf[respLen] = '\0';

@@ -161,7 +161,7 @@ void loop() {
 
             // Auto-stop at max duration
             if (!didBlock && voiceInput.isRecording()
-                && voiceInput.getRecordingDuration() >= 5.0f) {
+                && voiceInput.getRecordingDuration() >= 3.0f) {
                 chat.update(canvas);
                 voiceInput.drawTranscribingBar(canvas);
                 canvas.pushSprite(0, 0);
@@ -219,8 +219,8 @@ void loop() {
                 companion.triggerTalk();
 
                 aiClient.sendMessage(msg,
-                    // onToken
-                    [](const String& token) {
+                    // onToken — receives const char* (zero heap allocation)
+                    [](const char* token) {
                         chat.appendAIToken(token);
                         // Typing sound — short chirp, throttled
                         static unsigned long lastBeep = 0;
@@ -239,7 +239,10 @@ void loop() {
                     },
                     // onError
                     [](const String& error) {
-                        chat.appendAIToken("[Error: " + error + "]");
+                        // Build error string on stack to avoid heap allocation
+                        char errBuf[64];
+                        snprintf(errBuf, sizeof(errBuf), "[Error: %s]", error.c_str());
+                        chat.appendAIToken(errBuf);
                         chat.onAIResponseComplete();
                         companion.triggerIdle();
                     }

@@ -66,19 +66,25 @@ void AIClient::sendMessage(const String& userMessage,
 
     Serial.printf("[AI] Sent, heap=%u\n", ESP.getFreeHeap());
 
-    // Read HTTP response headers
+    // Read HTTP response headers — zero heap allocation (stack buffer only)
     unsigned long deadline = millis() + 30000;
     bool httpOk = false;
     bool chunked = false;
+    char hdrBuf[256];
+    int hdrLen = 0;
     while (client.connected() && millis() < deadline) {
-        if (client.available()) {
-            String line = client.readStringUntil('\n');
-            line.trim();
-            if (line.startsWith("HTTP/") && line.indexOf("200") > 0) httpOk = true;
-            if (line.startsWith("Transfer-Encoding") && line.indexOf("chunked") > 0) chunked = true;
-            if (line.length() == 0) break;
-        } else {
-            delay(10);
+        if (!client.available()) { delay(10); continue; }
+        char c = client.read();
+        if (c == '\n') {
+            // Strip trailing \r
+            if (hdrLen > 0 && hdrBuf[hdrLen - 1] == '\r') hdrLen--;
+            hdrBuf[hdrLen] = '\0';
+            if (hdrLen == 0) break; // empty line = end of headers
+            if (strstr(hdrBuf, "HTTP/") == hdrBuf && strstr(hdrBuf, "200")) httpOk = true;
+            if (strstr(hdrBuf, "chunked")) chunked = true;
+            hdrLen = 0;
+        } else if (hdrLen < (int)sizeof(hdrBuf) - 1) {
+            hdrBuf[hdrLen++] = c;
         }
     }
 
@@ -172,7 +178,7 @@ void AIClient::sendMessage(const String& userMessage,
                                 int flen = filterForDisplayBuf(contentBuf, filteredBuf, sizeof(filteredBuf));
                                 if (flen > 0) {
                                     fullResponse += filteredBuf;
-                                    if (onToken) onToken(String(filteredBuf));
+                                    if (onToken) onToken(filteredBuf);
                                 }
                             }
                         }
@@ -207,7 +213,7 @@ void AIClient::sendMessage(const String& userMessage,
                         int flen = filterForDisplayBuf(contentBuf, filteredBuf, sizeof(filteredBuf));
                         if (flen > 0) {
                             fullResponse += filteredBuf;
-                            if (onToken) onToken(String(filteredBuf));
+                            if (onToken) onToken(filteredBuf);
                         }
                     }
                 }

@@ -12,8 +12,8 @@ Listens on port 8090 by default (change with STT_PROXY_PORT env var).
 
 import os
 import sys
-import ssl
-import http.client
+import subprocess
+import tempfile
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Load .env file if present
@@ -29,6 +29,7 @@ if os.path.exists(env_file):
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 PORT = int(os.environ.get("STT_PROXY_PORT", "8090"))
+SOCKS_PROXY = os.environ.get("STT_SOCKS_PROXY", "socks5h://127.0.0.1:1080")
 
 if not GROQ_API_KEY:
     print("ERROR: GROQ_API_KEY not set. Export it or add to .env")
@@ -42,42 +43,59 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
         print(f"  Received {content_length} bytes from ESP32")
 
-        # Forward to Groq using http.client for reliable binary handling
-        ctx = ssl.create_default_context()
-        conn = http.client.HTTPSConnection("api.groq.com", context=ctx)
-
+        # Write body to temp file for curl (avoids pipe size limits)
         try:
-            conn.request(
-                "POST",
-                "/openai/v1/audio/transcriptions",
-                body=body,
-                headers={
-                    "Authorization": f"Bearer {GROQ_API_KEY}",
-                    "Content-Type": self.headers["Content-Type"],
-                    "Content-Length": str(len(body)),
-                    "User-Agent": "curl/8.7.1",
-                },
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".bin") as tmp:
+                tmp.write(body)
+                tmp_path = tmp.name
+
+            # Forward to Groq via curl through SOCKS proxy
+            result = subprocess.run(
+                [
+                    "curl", "-s",
+                    "--proxy", SOCKS_PROXY,
+                    "--max-time", "30",
+                    "-X", "POST",
+                    "https://api.groq.com/openai/v1/audio/transcriptions",
+                    "-H", f"Authorization: Bearer {GROQ_API_KEY}",
+                    "-H", f"Content-Type: {self.headers['Content-Type']}",
+                    "--data-binary", f"@{tmp_path}",
+                    "-w", "\n%{http_code}",
+                ],
+                capture_output=True,
+                timeout=35,
             )
 
-            resp = conn.getresponse()
-            resp_body = resp.read()
+            os.unlink(tmp_path)
 
-            print(f"  Groq response: {resp.status} {resp_body[:200].decode(errors='replace')}")
+            output = result.stdout
+            # Last line is the HTTP status code
+            lines = output.rsplit(b"\n", 1)
+            resp_body = lines[0] if len(lines) > 1 else output
+            status = int(lines[-1]) if len(lines) > 1 and lines[-1].strip().isdigit() else 502
 
-            self.send_response(resp.status)
+            # Ensure body ends with \n so ESP32's line-based reader can process it
+            if resp_body and not resp_body.endswith(b"\n"):
+                resp_body += b"\n"
+
+            print(f"  Groq response: {status} {resp_body[:200].decode(errors='replace')}")
+
+            self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(resp_body)))
             self.end_headers()
             self.wfile.write(resp_body)
         except Exception as e:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
             msg = f'{{"error":{{"message":"{e}"}}}}'.encode()
             self.send_response(502)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(msg)
             print(f"  Proxy error: {e}")
-        finally:
-            conn.close()
 
     def log_message(self, fmt, *args):
         print(f"[STT Proxy] {args[0]}")

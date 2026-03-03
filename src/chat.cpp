@@ -57,6 +57,11 @@ void Chat::begin(M5Canvas& canvas) {
         inputBuffer = "";
         pendingMessage = "";
         waitingForAI = false;
+        // Pre-reserve all message slots so later addMessage() never allocates.
+        // This keeps the large contiguous heap block intact for voice buffer.
+        for (int i = 0; i < MAX_MESSAGES; i++) {
+            messages[i].text.reserve(320);
+        }
         initialized = true;
     }
     canvas.setFont(&fonts::efontCN_12);
@@ -119,7 +124,7 @@ void Chat::scrollDown() {
     if (scrollY >= maxScroll) userScrolled = false;
 }
 
-void Chat::appendAIToken(const String& token) {
+void Chat::appendAIToken(const char* token) {
     if (messageCount > 0 && !messages[(messageCount - 1) % MAX_MESSAGES].isUser) {
         Message& lastMsg = messages[(messageCount - 1) % MAX_MESSAGES];
         if (lastMsg.text == "thinking...") {

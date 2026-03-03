@@ -33,7 +33,7 @@ private:
     String result;
 
     static constexpr uint32_t SAMPLE_RATE = 16000;
-    static constexpr float MAX_RECORD_SEC = 5.0f;
+    static constexpr float MAX_RECORD_SEC = 3.0f;  // 3s * 16kHz * 2B = 96KB (fits in fragmented heap)
     static constexpr float MIN_RECORD_SEC = 0.3f;
     static constexpr int INPUT_BAR_H = 16;
 

@@ -1,7 +1,6 @@
 #include "voice_input.h"
 #include "config.h"
 #include <WiFiClient.h>
-#include <HTTPClient.h>
 #include <ArduinoJson.h>
 
 #ifndef OPENCLAW_HOST
@@ -176,40 +175,26 @@ String VoiceInput::sendToSTT(const int16_t* data, size_t sampleCount) {
         "Content-Disposition: form-data; name=\"file\"; filename=\"recording.wav\"\r\n"
         "Content-Type: audio/wav\r\n\r\n";
 
-    String partMiddle = String("\r\n--") + boundary + "\r\n"
+    String partFooter = String("\r\n--") + boundary + "\r\n"
         "Content-Disposition: form-data; name=\"model\"\r\n\r\n"
         "whisper-1\r\n"
         "--" + boundary + "--\r\n";
 
-    size_t totalSize = partHeader.length() + 44 + dataSize + partMiddle.length();
+    size_t totalSize = partHeader.length() + 44 + dataSize + partFooter.length();
 
+    // Use raw WiFiClient for streaming upload (body too large for HTTPClient)
     WiFiClient client;
     client.setTimeout(30);
 
-    HTTPClient http;
-    String url = String("http://") + OPENCLAW_HOST + ":" + OPENCLAW_PORT + "/v1/audio/transcriptions";
-    Serial.println("[VOICE] POST to " + url);
+    int port = atoi(OPENCLAW_PORT);
+    Serial.printf("[VOICE] Connecting to %s:%d\n", OPENCLAW_HOST, port);
 
-    if (!http.begin(client, url)) {
-        Serial.println("[VOICE] HTTP begin failed");
-        return "";
-    }
-
-    http.setTimeout(30000);
-    http.addHeader("Authorization", String("Bearer ") + OPENCLAW_TOKEN);
-    http.addHeader("Content-Type", String("multipart/form-data; boundary=") + boundary);
-    http.addHeader("Content-Length", String(totalSize));
-
-    // We need to send the body in pieces since it's too large for a single String
-    // Use WiFiClient directly for streaming upload
-    client.connect(OPENCLAW_HOST, atoi(OPENCLAW_PORT));
-    if (!client.connected()) {
+    if (!client.connect(OPENCLAW_HOST, port)) {
         Serial.println("[VOICE] Connection failed");
-        http.end();
         return "";
     }
 
-    // Send HTTP request line and headers manually
+    // Send HTTP request line and headers
     client.print(String("POST /v1/audio/transcriptions HTTP/1.1\r\n") +
                  "Host: " + OPENCLAW_HOST + ":" + OPENCLAW_PORT + "\r\n" +
                  "Authorization: Bearer " + OPENCLAW_TOKEN + "\r\n" +
@@ -217,7 +202,7 @@ String VoiceInput::sendToSTT(const int16_t* data, size_t sampleCount) {
                  "Content-Length: " + String(totalSize) + "\r\n" +
                  "Connection: close\r\n\r\n");
 
-    // Send multipart body
+    // Send multipart body: file part header + WAV header + PCM data + footer
     client.print(partHeader);
     client.write(wavHeader, 44);
 
@@ -235,20 +220,33 @@ String VoiceInput::sendToSTT(const int16_t* data, size_t sampleCount) {
         yield(); // let WiFi stack process
     }
 
-    client.print(partMiddle);
+    client.print(partFooter);
+    client.flush();
 
-    // Read response
-    unsigned long timeout = millis() + 30000;
-    while (!client.available() && millis() < timeout) {
+    // Wait for response (server processes audio, may take a few seconds)
+    unsigned long deadline = millis() + 30000;
+    while (!client.available() && client.connected() && millis() < deadline) {
         delay(10);
     }
 
+    if (!client.available()) {
+        Serial.println("[VOICE] STT timeout — no response");
+        client.stop();
+        return "";
+    }
+
+    // Read response: skip HTTP headers, then read body
     String response;
     bool headersDone = false;
-    while (client.available() || millis() < timeout) {
+    while (client.connected() || client.available()) {
+        if (millis() > deadline) {
+            Serial.println("[VOICE] Response read timeout");
+            break;
+        }
         if (client.available()) {
             String line = client.readStringUntil('\n');
             if (!headersDone) {
+                // Empty line (just \r) marks end of headers
                 if (line == "\r" || line.length() == 0) {
                     headersDone = true;
                 }
@@ -256,12 +254,7 @@ String VoiceInput::sendToSTT(const int16_t* data, size_t sampleCount) {
                 response += line;
             }
         } else {
-            delay(10);
-        }
-        // Break if we got data and nothing more is coming
-        if (headersDone && response.length() > 0 && !client.available()) {
-            delay(100);
-            if (!client.available()) break;
+            delay(5);
         }
     }
 

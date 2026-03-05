@@ -6,10 +6,10 @@ A pixel-art desktop companion running on M5Stack Cardputer (ESP32-S3). Features 
 
 ## Features
 
-- **Companion Mode** — Pixel lobster with idle, happy, sleep, talk, stretch, and look-around animations. Day/night background with stars and moon. NTP clock display.
+- **Companion Mode** — Pixel lobster with idle, happy, sleep, talk, stretch, and look-around animations. Movable with keyboard (hold to walk). Day/night background with time-travel sky (walk left = past, right = future). NTP clock display.
 - **Chat Mode** — Full keyboard input, AI conversation with SSE streaming (token-by-token display), scrollable message history with word-wrap.
 - **Voice Input** — Push-to-talk via Fn key, speech-to-text via Groq Whisper API (through a local proxy server).
-- **Desktop Pet Sync** — macOS companion app receives lobster state over UDP, rendering a synced desktop pet on your Mac.
+- **Desktop Pet Sync** — macOS companion app receives lobster state and position over UDP, rendering a synced desktop pet on your Mac. Move the pet on Cardputer and it moves on your desktop too.
 - **OpenClaw Integration** — Connects to your local OpenClaw Gateway over LAN. Multi-model fallback (Kimi/Claude/GPT/Gemini), persistent memory, 5400+ community skills.
 - **Dual WiFi + Offline Mode** — Auto-fallback to secondary WiFi (e.g. phone hotspot). Gateway host switches automatically. Offline mode if all WiFi fails (companion works, chat shows offline).
 - **Runtime Config** — Setup wizard to configure WiFi, Gateway, STT host at runtime. Build-time values as defaults, Fn+R to reset.
@@ -68,6 +68,10 @@ pio device monitor
 | Key | Companion Mode | Chat Mode |
 |-----|---------------|-----------|
 | TAB | Switch to chat | Switch to companion |
+| `,` (hold) | Move left | — |
+| `/` (hold) | Move right | — |
+| `;` (hold) | Move up | — |
+| `.` (hold) | Move down | — |
 | Space / Enter | Happy animation | Send message |
 | Backspace | — | Delete character |
 | Fn (hold) | — | Push-to-talk voice input |
@@ -155,7 +159,8 @@ See [OpenClaw Research](docs/openclaw-research.md) for the full integration guid
 - [x] Voice input (push-to-talk + Groq Whisper STT)
 - [x] Desktop pet sync (macOS companion via UDP)
 - [x] Dual WiFi + offline mode + runtime config (Phase 4.5)
-- [ ] TTS voice replies (AI speaks through speaker)
+- [x] TTS voice replies (AI speaks through speaker)
+- [x] Pet movement + time-travel sky + desktop position sync
 - [ ] Battery display with low-power character animation
 - [ ] Chat history persistence (NVS/SD card)
 - [ ] Pet system (hunger/mood mechanics)

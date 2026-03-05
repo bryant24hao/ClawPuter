@@ -117,9 +117,19 @@ desktop/CardputerDesktopPet/
 
 ### 不做
 - ❌ Accessibility API 获取窗口边界（需要额外权限）
-- ❌ Cardputer 联动同步（后续再加）
 - ❌ 右键菜单互动
 - ❌ 拖拽（窗口设为点击穿透）
+
+## v2 新增：Cardputer 位置同步
+
+### Step 6: 硬件位置同步
+
+- `UDPListener.swift` 解析 UDP 包中的 `x`/`y`/`d` 字段
+- `PetBehavior.applySync()` 扩展：接收归一化坐标和朝向
+- **位置去重**：只有当硬件坐标变化（阈值 > 0.005）时才覆盖桌面端目标位置，避免持续广播抢占鼠标跟随
+- **坐标映射**：`targetX = screenMinX + normX * (screenWidth - petSize)`，Y 轴翻转（`1.0 - normY`）
+- **朝向同步**：`d=0` 朝右，`d=1` 朝左
+- 鼠标跟随和硬件位置共存：鼠标始终可以移动宠物位置，硬件位置变化时覆盖目标
 
 ## 参考项目
 

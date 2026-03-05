@@ -16,7 +16,7 @@
 - **格式**: 紧凑 JSON
 
 ```json
-{"s":0,"f":1,"m":"COMPANION"}
+{"s":0,"f":1,"m":"COMPANION","x":0.50,"y":0.80,"d":0}
 ```
 
 | 字段 | 含义 | 值 |
@@ -24,6 +24,9 @@
 | `s` | CompanionState 枚举值 | 0=IDLE, 1=HAPPY, 2=SLEEP, 3=TALK, 4=STRETCH, 5=LOOK |
 | `f` | frameIndex | 当前动画帧索引 |
 | `m` | appMode | "COMPANION" / "CHAT" / "SETUP" |
+| `x` | 宠物归一化 X 坐标 | 0.00（最左）~ 1.00（最右） |
+| `y` | 宠物归一化 Y 坐标 | 0.00（最上）~ 1.00（最下） |
+| `d` | 朝向 | 0=右, 1=左 |
 
 用 JSON：方便调试（`nc -u -l 19820` 直接能看），ArduinoJson 固件里已有。
 
@@ -32,6 +35,7 @@
 - **收到 UDP 包** → 切到"同步模式"，用 ESP32 的状态和帧号渲染
 - **3 秒没收到包** → 回退"独立模式"（光标跟随逻辑）
 - 同步模式下光标跟随仍生效（位置跟光标，动画状态跟 ESP32）
+- **位置同步** → 当 `x`/`y` 值变化时（阈值 > 0.005），桌面端将归一化坐标映射到屏幕坐标并设为目标位置。Y 轴翻转（ESP32 y=0 在上，macOS y=0 在下）
 
 ## 改动
 
@@ -40,8 +44,9 @@
 **`src/state_broadcast.h`** — 新建
 ```cpp
 #pragma once
-void stateBroadcastBegin();
-void stateBroadcastTick(int state, int frame, const char* mode);
+void stateBroadcastBegin(const char* unicastTarget = nullptr);
+void stateBroadcastTick(int state, int frame, const char* mode,
+                        float normX = 0.5f, float normY = 0.5f, int direction = 0);
 ```
 
 **`src/state_broadcast.cpp`** — 新建

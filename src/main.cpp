@@ -159,31 +159,52 @@ void loop() {
             updateSetupMode();
             break;
 
-        case AppMode::COMPANION:
+        case AppMode::COMPANION: {
+            // Use keysState() for continuous movement detection (hold-to-move)
+            auto ks = M5Cardputer.Keyboard.keysState();
+
             if (keyPressed) {
-                if (keys.tab) {
+                if (ks.tab) {
                     playTransition(canvas, true);
                     enterChatMode();
                     break;
                 }
                 // Fn+R = reset config
-                if (keys.fn && keys.word.size() > 0 && keys.word[0] == 'r') {
-                    WiFi.disconnect(true);  // Clear ESP32 internal WiFi cache
+                if (ks.fn && ks.word.size() > 0 && ks.word[0] == 'r') {
+                    WiFi.disconnect(true);
                     Config::reset();
                     fillBuildTimeDefaults();
                     Config::save();
                     enterSetupMode();
                     break;
                 }
-                // Any other key → companion handles it
+                // Non-movement keys → companion handles (space/enter for happy, etc.)
                 char key = 0;
-                if (keys.enter) key = '\n';
-                else if (keys.word.size() > 0) key = keys.word[0];
+                if (ks.enter) key = '\n';
+                else if (ks.word.size() > 0) {
+                    char ch = ks.word[0];
+                    // Skip movement keys — handled below via continuous detection
+                    if (ch != ';' && ch != '.' && ch != ',' && ch != '/')
+                        key = ch;
+                }
                 if (key) companion.handleKey(key);
             }
+
+            // Continuous direction keys: ;=up .=down ,=left /=right
+            // These work even when held down (no isChange required)
+            for (char ch : ks.word) {
+                switch (ch) {
+                    case ';': companion.move(0, -1); break;
+                    case '.': companion.move(0,  1); break;
+                    case ',': companion.move(-1, 0); break;
+                    case '/': companion.move( 1, 0); break;
+                }
+            }
+
             companion.update(canvas);
             canvas.pushSprite(0, 0);
             break;
+        }
 
         case AppMode::CHAT: {
             // ── Keyboard state via keysState() + manual edge detection ──
@@ -359,7 +380,9 @@ void loop() {
         const char* modeStr = "COMPANION";
         if (appMode == AppMode::CHAT) modeStr = "CHAT";
         stateBroadcastTick(static_cast<int>(companion.getState()),
-                           companion.getFrameIndex(), modeStr);
+                           companion.getFrameIndex(), modeStr,
+                           companion.getNormX(), companion.getNormY(),
+                           companion.isFacingLeft() ? 1 : 0);
     }
 
     delay(16); // ~60fps cap

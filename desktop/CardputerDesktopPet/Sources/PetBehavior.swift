@@ -55,6 +55,8 @@ class PetBehavior {
     private var lastSyncTime: TimeInterval = 0
     private let syncTimeout: TimeInterval = 3.0 // fall back to independent mode after 3s
     private var syncDirty: Bool = false // set by applySync, consumed by update
+    private var lastSyncNormX: Float = -1
+    private var lastSyncNormY: Float = -1
 
     init() {
         lastUpdateTime = ProcessInfo.processInfo.systemUptime
@@ -117,7 +119,8 @@ class PetBehavior {
     }
 
     /// Apply state from ESP32 UDP broadcast
-    func applySync(state espState: Int, frame: Int) {
+    func applySync(state espState: Int, frame: Int,
+                   normX: Float? = nil, normY: Float? = nil, direction: Int? = nil) {
         lastSyncTime = ProcessInfo.processInfo.systemUptime
         syncMode = true
 
@@ -136,6 +139,26 @@ class PetBehavior {
         // Use the firmware's frame index directly
         let frames = currentFrames()
         currentFrame = frame % frames.count
+
+        // Sync position when hardware position changes
+        if let nx = normX, let ny = normY {
+            let posChanged = abs(nx - lastSyncNormX) > 0.005 || abs(ny - lastSyncNormY) > 0.005
+            if posChanged {
+                lastSyncNormX = nx
+                lastSyncNormY = ny
+                if let screen = NSScreen.main?.frame {
+                    let petSize: CGFloat = 128
+                    targetX = screen.minX + CGFloat(max(0, min(1, nx))) * (screen.width - petSize)
+                    targetY = screen.minY + CGFloat(1.0 - max(0, min(1, ny))) * (screen.height - petSize)
+                }
+            }
+        }
+
+        // Sync facing direction
+        if let d = direction {
+            facingLeft = (d != 0)
+        }
+
         syncDirty = true
     }
 

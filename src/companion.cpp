@@ -2,13 +2,18 @@
 #include "sprites.h"
 #include <time.h>
 
-// Character draw position (centered, above ground)
+// Character draw dimensions
 constexpr int CHAR_SCALE = 3;  // 16×3 = 48px on screen
 constexpr int CHAR_DRAW_W = CHAR_W * CHAR_SCALE;
 constexpr int CHAR_DRAW_H = CHAR_H * CHAR_SCALE;
 constexpr int GROUND_Y = SCREEN_H - 28;
-constexpr int CHAR_X = (SCREEN_W - CHAR_DRAW_W) / 2;
-constexpr int CHAR_Y = GROUND_Y - CHAR_DRAW_H - 2;
+
+// Movement
+constexpr int MOVE_STEP = 2;  // 2px per step (~120px/s at 60fps)
+constexpr int MOVE_MIN_X = 0;
+constexpr int MOVE_MAX_X = SCREEN_W - CHAR_DRAW_W;
+constexpr int MOVE_MIN_Y = 16;  // below clock area
+constexpr int MOVE_MAX_Y = GROUND_Y - CHAR_DRAW_H - 2;
 
 // Day/night colors
 constexpr uint16_t SKY_DAY    = rgb565(60, 120, 200);   // Blue sky
@@ -21,6 +26,11 @@ constexpr uint16_t MOON_COLOR = rgb565(220, 220, 200);
 constexpr uint16_t CLOUD_COLOR = rgb565(220, 230, 240);
 
 void Companion::begin(M5Canvas& canvas) {
+    // Center position on first call; preserve across mode switches
+    if (charX == 0 && charY == 0) {
+        charX = (SCREEN_W - CHAR_DRAW_W) / 2;
+        charY = MOVE_MAX_Y;
+    }
     initStars();
     setState(CompanionState::IDLE);
     spontaneousTimer.setInterval(8000 + random(7000)); // 8-15s
@@ -40,8 +50,15 @@ int Companion::currentHour() {
     return timeinfo.tm_hour;
 }
 
+int Companion::displayHour() {
+    int sysHour = currentHour();
+    float offset = (getNormX() - 0.5f) * 24.0f;
+    int h = sysHour + (int)roundf(offset);
+    return ((h % 24) + 24) % 24;  // wrap to [0, 23]
+}
+
 bool Companion::isNightTime() {
-    int h = currentHour();
+    int h = displayHour();
     return h >= 19 || h < 6;
 }
 
@@ -181,6 +198,39 @@ void Companion::triggerIdle() {
     playNotification();
 }
 
+void Companion::move(int dx, int dy) {
+    charX += dx * MOVE_STEP;
+    charY += dy * MOVE_STEP;
+
+    // Clamp to bounds
+    if (charX < MOVE_MIN_X) charX = MOVE_MIN_X;
+    if (charX > MOVE_MAX_X) charX = MOVE_MAX_X;
+    if (charY < MOVE_MIN_Y) charY = MOVE_MIN_Y;
+    if (charY > MOVE_MAX_Y) charY = MOVE_MAX_Y;
+
+    // Update facing direction
+    if (dx < 0) facingLeft = true;
+    if (dx > 0) facingLeft = false;
+
+    // Reset idle timeout on movement
+    idleTimeout.reset();
+
+    // Wake from sleep
+    if (state == CompanionState::SLEEP) {
+        setState(CompanionState::IDLE);
+    }
+}
+
+float Companion::getNormX() const {
+    if (MOVE_MAX_X <= MOVE_MIN_X) return 0.5f;
+    return (float)(charX - MOVE_MIN_X) / (MOVE_MAX_X - MOVE_MIN_X);
+}
+
+float Companion::getNormY() const {
+    if (MOVE_MAX_Y <= MOVE_MIN_Y) return 0.5f;
+    return (float)(charY - MOVE_MIN_Y) / (MOVE_MAX_Y - MOVE_MIN_Y);
+}
+
 // ── Sound Effects ──
 
 void Companion::playKeyClick() {
@@ -204,7 +254,7 @@ void Companion::playHappy() {
 // ── Drawing ──
 
 void Companion::drawBackground(M5Canvas& canvas) {
-    int h = currentHour();
+    int h = displayHour();
     uint16_t skyColor, groundColor, groundTopColor;
 
     if (h >= 6 && h < 17) {
@@ -322,14 +372,15 @@ void Companion::drawCharacter(M5Canvas& canvas) {
             yOffset = -3;
         }
 
-        drawSprite16(canvas, CHAR_X + xOffset, CHAR_Y + yOffset, frame);
+        drawSprite16(canvas, charX + xOffset, charY + yOffset, frame, facingLeft);
     }
 }
 
-void Companion::drawSprite16(M5Canvas& canvas, int x, int y, const uint16_t* data) {
+void Companion::drawSprite16(M5Canvas& canvas, int x, int y, const uint16_t* data, bool flip) {
     for (int py = 0; py < CHAR_H; py++) {
         for (int px = 0; px < CHAR_W; px++) {
-            uint16_t color = pgm_read_word(&data[py * CHAR_W + px]);
+            int srcX = flip ? (CHAR_W - 1 - px) : px;
+            uint16_t color = pgm_read_word(&data[py * CHAR_W + srcX]);
             if (color != Color::TRANSPARENT) {
                 canvas.fillRect(x + px * CHAR_SCALE, y + py * CHAR_SCALE,
                                CHAR_SCALE, CHAR_SCALE, color);
@@ -366,15 +417,15 @@ void Companion::drawSleepZ(M5Canvas& canvas) {
 
     if (phase >= 1) {
         canvas.setTextSize(1);
-        canvas.drawString("z", CHAR_X + CHAR_DRAW_W + 4, CHAR_Y + 10);
+        canvas.drawString("z", charX + CHAR_DRAW_W + 4, charY + 10);
     }
     if (phase >= 2) {
         canvas.setTextSize(1);
-        canvas.drawString("Z", CHAR_X + CHAR_DRAW_W + 10, CHAR_Y);
+        canvas.drawString("Z", charX + CHAR_DRAW_W + 10, charY);
     }
     if (phase >= 3) {
         canvas.setTextSize(2);
-        canvas.drawString("Z", CHAR_X + CHAR_DRAW_W + 16, CHAR_Y - 12);
+        canvas.drawString("Z", charX + CHAR_DRAW_W + 16, charY - 12);
     }
 }
 

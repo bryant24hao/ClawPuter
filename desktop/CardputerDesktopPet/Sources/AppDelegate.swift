@@ -52,9 +52,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Start UDP listener for Cardputer state sync
         udpListener = UDPListener()
-        udpListener.onStateReceived = { [weak self] state, frame, mode in
+        udpListener.onStateReceived = { [weak self] state, frame, mode, normX, normY, direction in
             // Already on main queue (UDPListener dispatches to main)
-            self?.behavior.applySync(state: state, frame: frame)
+            self?.behavior.applySync(state: state, frame: frame,
+                                     normX: normX, normY: normY, direction: direction)
         }
         udpListener.start()
 

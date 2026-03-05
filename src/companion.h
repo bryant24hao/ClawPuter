@@ -17,6 +17,8 @@ public:
     void update(M5Canvas& canvas);
     void handleKey(char key);
 
+    void move(int dx, int dy);  // dx/dy: -1, 0, +1
+
     // External triggers
     void triggerHappy();
     void triggerTalk();
@@ -24,6 +26,9 @@ public:
 
     CompanionState getState() const { return state; }
     int getFrameIndex() const { return frameIndex; }
+    float getNormX() const;
+    float getNormY() const;
+    bool isFacingLeft() const { return facingLeft; }
 
     // Sound effects
     static void playKeyClick();
@@ -33,6 +38,8 @@ public:
 private:
     CompanionState state = CompanionState::IDLE;
     int frameIndex = 0;
+    int charX = 0, charY = 0;  // pixel position (initialized in begin())
+    bool facingLeft = false;
     Timer animTimer{500};
     Timer idleTimeout{30000};  // 30s → sleep
     Timer clockTimer{1000};
@@ -48,6 +55,7 @@ private:
     // Day/night
     bool isNightTime();
     int currentHour();
+    int displayHour();  // time-travel: hour adjusted by pet X position
 
     void drawBackground(M5Canvas& canvas);
     void drawCharacter(M5Canvas& canvas);
@@ -60,8 +68,8 @@ private:
     void initStars();
     void trySpontaneousAction();
 
-    // Draw a sprite with transparency
-    void drawSprite16(M5Canvas& canvas, int x, int y, const uint16_t* data);
+    // Draw a sprite with transparency (flip=true for horizontal mirror)
+    void drawSprite16(M5Canvas& canvas, int x, int y, const uint16_t* data, bool flip = false);
 };
 
 // Boot animation (called from main.cpp)

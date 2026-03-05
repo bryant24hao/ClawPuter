@@ -11,6 +11,8 @@ A pixel-art desktop companion running on M5Stack Cardputer (ESP32-S3). Features 
 - **Voice Input** — Push-to-talk via Fn key, speech-to-text via Groq Whisper API (through a local proxy server).
 - **Desktop Pet Sync** — macOS companion app receives lobster state over UDP, rendering a synced desktop pet on your Mac.
 - **OpenClaw Integration** — Connects to your local OpenClaw Gateway over LAN. Multi-model fallback (Kimi/Claude/GPT/Gemini), persistent memory, 5400+ community skills.
+- **Dual WiFi + Offline Mode** — Auto-fallback to secondary WiFi (e.g. phone hotspot). Gateway host switches automatically. Offline mode if all WiFi fails (companion works, chat shows offline).
+- **Runtime Config** — Setup wizard to configure WiFi, Gateway, STT host at runtime. Build-time values as defaults, Fn+R to reset.
 - **Boot Animation** — Lobster pixel-art line-by-line reveal with pixel wipe transitions between modes.
 - **Sound Effects** — Key clicks, happy melody, typing chirps during AI streaming, notification tones.
 
@@ -32,6 +34,11 @@ export OPENCLAW_TOKEN="<your-gateway-token>"
 export GROQ_API_KEY="<your-groq-api-key>"    # Used by tools/stt_proxy.py, not the firmware
 export STT_PROXY_HOST="<your-host-ip>"       # Machine running stt_proxy.py
 export STT_PROXY_PORT="8090"                 # STT proxy port (default 8090)
+
+# Secondary WiFi (optional, for phone hotspot fallback)
+export WIFI_SSID2="<your-hotspot-ssid>"
+export WIFI_PASS2="<your-hotspot-password>"
+export OPENCLAW_HOST2="<your-hotspot-host-ip>"  # Mac's IP on the hotspot network
 ```
 
 ### 2. Build & Flash
@@ -66,7 +73,8 @@ pio device monitor
 | Fn (hold) | — | Push-to-talk voice input |
 | Fn + ; | — | Scroll up |
 | Fn + / | — | Scroll down |
-| Fn + R | Reset config | — |
+| Fn + R | Reset config + setup wizard | — |
+| TAB (in setup) | Exit setup, return to companion | — |
 | Any key | Wake up lobster | Type character |
 
 ## Project Structure
@@ -89,6 +97,15 @@ desktop/
 tools/
 └── stt_proxy.py          # Local HTTP proxy: ESP32 audio → Groq Whisper API
 ```
+
+## iPhone Hotspot Tips
+
+If using an iPhone hotspot as secondary WiFi:
+
+1. **Enable "Maximize Compatibility"** — Go to Settings > Personal Hotspot and turn it on. iPhone defaults to 5GHz; ESP32 only supports 2.4GHz.
+2. **Keep hotspot settings page open** — iPhone hotspot goes dormant when no devices are connected. The Cardputer won't find it unless the Personal Hotspot settings screen is open on the iPhone.
+3. **UDP broadcast is blocked** — iPhone hotspot isolates clients, blocking UDP broadcast between devices. The firmware works around this by sending both broadcast and unicast (directly to the gateway host IP).
+4. **Find your Mac's hotspot IP** — When your Mac connects to the iPhone hotspot, check its IP with `ifconfig en0` (usually `172.20.10.x`). Set this as `OPENCLAW_HOST2`.
 
 ## Hardware
 
@@ -137,6 +154,7 @@ See [OpenClaw Research](docs/openclaw-research.md) for the full integration guid
 - [x] Streaming responses (SSE token-by-token display)
 - [x] Voice input (push-to-talk + Groq Whisper STT)
 - [x] Desktop pet sync (macOS companion via UDP)
+- [x] Dual WiFi + offline mode + runtime config (Phase 4.5)
 - [ ] TTS voice replies (AI speaks through speaker)
 - [ ] Battery display with low-power character animation
 - [ ] Chat history persistence (NVS/SD card)

@@ -31,7 +31,7 @@ if os.path.exists(env_file):
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 PORT = int(os.environ.get("STT_PROXY_PORT", "8090"))
-SOCKS_PROXY = os.environ.get("STT_SOCKS_PROXY", "socks5h://127.0.0.1:1080")
+SOCKS_PROXY = os.environ.get("STT_SOCKS_PROXY", "")
 
 if not GROQ_API_KEY:
     print("ERROR: GROQ_API_KEY not set. Export it or add to .env")
@@ -159,19 +159,21 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 tmp.write(body)
                 tmp_path = tmp.name
 
-            # Forward to Groq via curl through SOCKS proxy
+            # Forward to Groq via curl (optionally through SOCKS proxy)
+            cmd = ["curl", "-s"]
+            if SOCKS_PROXY:
+                cmd += ["--proxy", SOCKS_PROXY]
+            cmd += [
+                "--max-time", "30",
+                "-X", "POST",
+                "https://api.groq.com/openai/v1/audio/transcriptions",
+                "-H", f"Authorization: Bearer {GROQ_API_KEY}",
+                "-H", f"Content-Type: {self.headers['Content-Type']}",
+                "--data-binary", f"@{tmp_path}",
+                "-w", "\n%{http_code}",
+            ]
             result = subprocess.run(
-                [
-                    "curl", "-s",
-                    "--proxy", SOCKS_PROXY,
-                    "--max-time", "30",
-                    "-X", "POST",
-                    "https://api.groq.com/openai/v1/audio/transcriptions",
-                    "-H", f"Authorization: Bearer {GROQ_API_KEY}",
-                    "-H", f"Content-Type: {self.headers['Content-Type']}",
-                    "--data-binary", f"@{tmp_path}",
-                    "-w", "\n%{http_code}",
-                ],
+                cmd,
                 capture_output=True,
                 timeout=35,
             )
@@ -214,7 +216,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     server = HTTPServer(("0.0.0.0", PORT), ProxyHandler)
     print(f"STT/TTS Proxy listening on 0.0.0.0:{PORT}")
-    print(f"Groq key: {GROQ_API_KEY[:10]}...")
+    print(f"Groq key: {'set' if GROQ_API_KEY else 'NOT SET'} ({len(GROQ_API_KEY)} chars)")
     print(f"  STT: POST /v1/audio/transcriptions → Groq")
     print(f"  TTS: POST /v1/audio/speech → edge-tts + ffmpeg")
     try:

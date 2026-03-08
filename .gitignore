@@ -4,3 +4,4 @@
 *.env
 .build/
 .DS_Store
+CLAUDE.md

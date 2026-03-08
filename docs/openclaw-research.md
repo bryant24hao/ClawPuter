@@ -109,7 +109,7 @@ Cardputer (ESP32-S3)  ←── HTTP (OpenAI 兼容) ──→  OpenClaw Gateway
 
 **请求格式**（和 Kimi K2.5 完全一样）：
 ```bash
-curl http://<YOUR_MAC_IP>:18789/v1/chat/completions \
+curl http://<YOUR_MAC_IP>:<your-port>/v1/chat/completions \
   -H 'Authorization: Bearer <gateway-token>' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -168,7 +168,7 @@ Cardputer
 | 项 | 值 |
 |---|---|
 | 版本 | 2026.2.26 |
-| Gateway | `ws://127.0.0.1:18789`（当前仅 loopback） |
+| Gateway | `ws://127.0.0.1:<your-port>`（当前仅 loopback） |
 | 认证 | token 模式 |
 | 主模型 | Kimi K2.5（回退 Gemini 3 Pro / GPT 5.2） |
 | 渠道 | Telegram + 飞书 |
@@ -200,7 +200,7 @@ Cardputer
 
 验证：
 ```bash
-curl http://<YOUR_MAC_IP>:18789/v1/chat/completions \
+curl http://<YOUR_MAC_IP>:<your-port>/v1/chat/completions \
   -H 'Authorization: Bearer <gateway-token>' \
   -H 'Content-Type: application/json' \
   -d '{"model":"openclaw","messages":[{"role":"user","content":"hi"}]}'
@@ -212,7 +212,7 @@ curl http://<YOUR_MAC_IP>:18789/v1/chat/completions \
 
 | 当前 (Kimi) | 改为 (OpenClaw) |
 |---|---|
-| `https://api.moonshot.cn/v1/chat/completions` | `http://<YOUR_MAC_IP>:18789/v1/chat/completions` |
+| `https://api.moonshot.cn/v1/chat/completions` | `http://<YOUR_MAC_IP>:<your-port>/v1/chat/completions` |
 | `Authorization: Bearer <kimi-key>` | `Authorization: Bearer <gateway-token>` |
 | `"model": "kimi-k2.5"` | `"model": "openclaw"` |
 | HTTPS + `setInsecure()` | HTTP（局域网，无需 TLS） |

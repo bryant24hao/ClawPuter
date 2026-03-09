@@ -38,6 +38,7 @@ public:
 
     CompanionState getState() const { return state; }
     WeatherType getWeatherType() const { return weather.type; }
+    float getTemperature() const { return weather.temperature; }
     bool hasValidWeather() const { return weather.valid; }
     int getFrameIndex() const { return frameIndex; }
     float getNormX() const;

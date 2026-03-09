@@ -131,6 +131,29 @@ desktop/CardputerDesktopPet/
 - **朝向同步**：`d=0` 朝右，`d=1` 朝左
 - 鼠标跟随和硬件位置共存：鼠标始终可以移动宠物位置，硬件位置变化时覆盖目标
 
+## v3 新增：双模式 + 天气场景
+
+详细设计文档见 [`desktop-weather-scene-prd.md`](desktop-weather-scene-prd.md)。
+
+### 核心变化
+
+- **双模式架构**：Follow Mode（原始透明跟随）和 Scene Mode（完整天气场景面板）
+- **Scene Mode**：360×200 NSPanel 锚定在 menu bar 🦞 图标下方，渲染天空/天体/天气粒子/地面/时钟+温度
+- **Time-travel**：仅 Scene Mode 生效，sprite X 位置偏移 displayHour ±12h
+- **温度同步**：ESP32 广播包新增 `"t"` 字段，Scene Mode 地面区域显示温度
+- **切换方式**：menu bar 🦞 下拉菜单选择 Follow Mode / Scene Mode
+
+### 新增文件结构
+
+```
+Sources/
+├── PetView.swift          # 新增 sceneMode 分支：drawFollow() / drawScene()
+│                          # 场景渲染：sky, celestials, particles, ground, clock
+├── AppDelegate.swift      # 双窗口管理：petWindow(follow) + scenePanel(scene)
+│                          # menu bar 模式切换
+└── UDPListener.swift      # 新增 temperature 解析
+```
+
 ## 参考项目
 
 - [Shijima-Qt](https://github.com/pixelomer/Shijima-Qt) — Qt 跨平台 Shimeji，macOS Accessibility API 参考

@@ -16,7 +16,7 @@
 - **格式**: 紧凑 JSON
 
 ```json
-{"s":0,"f":1,"m":"COMPANION","x":0.50,"y":0.80,"d":0}
+{"s":0,"f":1,"m":"COMPANION","x":0.50,"y":0.80,"d":0,"w":5,"t":22.3}
 ```
 
 | 字段 | 含义 | 值 |
@@ -27,6 +27,8 @@
 | `x` | 宠物归一化 X 坐标 | 0.00（最左）~ 1.00（最右） |
 | `y` | 宠物归一化 Y 坐标 | 0.00（最上）~ 1.00（最下） |
 | `d` | 朝向 | 0=右, 1=左 |
+| `w` | 天气类型 | -1=未知, 0=CLEAR..7=THUNDER |
+| `t` | 温度（°C） | 浮点数，无有效天气时不包含此字段 |
 
 用 JSON：方便调试（`nc -u -l 19820` 直接能看），ArduinoJson 固件里已有。
 
@@ -46,7 +48,8 @@
 #pragma once
 void stateBroadcastBegin(const char* unicastTarget = nullptr);
 void stateBroadcastTick(int state, int frame, const char* mode,
-                        float normX = 0.5f, float normY = 0.5f, int direction = 0);
+                        float normX = 0.5f, float normY = 0.5f, int direction = 0,
+                        int weatherType = -1, float temperature = -999);
 ```
 
 **`src/state_broadcast.cpp`** — 新建

@@ -120,8 +120,10 @@ The lobster lives on a 240x135 pixel screen with a dynamic background:
 
 ### Desktop Pet Sync
 
-- A macOS Swift app (`desktop/CardputerDesktopPet/`) receives the pet's state, position, and weather via UDP broadcast.
-- Move the pet on the Cardputer and it moves on your desktop. Animations and weather effects sync in real-time.
+- A macOS Swift app (`desktop/CardputerDesktopPet/`) receives the pet's state, position, weather, and temperature via UDP broadcast.
+- **Follow Mode** (default): transparent sprite follows your cursor around the desktop, with weather accessories synced.
+- **Scene Mode**: a 360×200 pixel weather scene panel anchored below the menu bar 🦞 icon — complete with sky (day/dusk/night), celestials (sun/moon/stars/clouds), weather particles (rain/snow/fog/thunder), ground with clock and temperature display. Time-travel works: the sprite's X position shifts the sky ±12 hours.
+- Switch modes from the menu bar 🦞 dropdown.
 
 ### Networking & Config
 

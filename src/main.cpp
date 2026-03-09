@@ -408,10 +408,11 @@ void loop() {
         const char* modeStr = "COMPANION";
         if (appMode == AppMode::CHAT) modeStr = "CHAT";
         int wType = companion.hasValidWeather() ? static_cast<int>(companion.getWeatherType()) : -1;
+        float temp = companion.hasValidWeather() ? companion.getTemperature() : -999;
         stateBroadcastTick(static_cast<int>(companion.getState()),
                            companion.getFrameIndex(), modeStr,
                            companion.getNormX(), companion.getNormY(),
-                           companion.isFacingLeft() ? 1 : 0, wType);
+                           companion.isFacingLeft() ? 1 : 0, wType, temp);
     }
 
     delay(16); // ~60fps cap

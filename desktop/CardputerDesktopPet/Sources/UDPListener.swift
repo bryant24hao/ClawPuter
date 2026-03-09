@@ -6,8 +6,8 @@ class UDPListener {
     private var listenThread: Thread?
     private var running = false
 
-    /// Callback: (state, frameIndex, appMode, normX, normY, direction, weatherType) — called on main queue
-    var onStateReceived: ((Int, Int, String, Float?, Float?, Int?, Int?) -> Void)?
+    /// Callback: (state, frameIndex, appMode, normX, normY, direction, weatherType, temperature) — called on main queue
+    var onStateReceived: ((Int, Int, String, Float?, Float?, Int?, Int?, Float?) -> Void)?
 
     func start() {
         // Create UDP socket
@@ -93,10 +93,11 @@ class UDPListener {
         let normY = (json["y"] as? NSNumber)?.floatValue
         let direction = json["d"] as? Int
         let weatherType = json["w"] as? Int
+        let temperature = (json["t"] as? NSNumber)?.floatValue
 
         let callback = onStateReceived
         DispatchQueue.main.async {
-            callback?(state, frame, mode, normX, normY, direction, weatherType)
+            callback?(state, frame, mode, normX, normY, direction, weatherType, temperature)
         }
     }
 }

@@ -10,9 +10,11 @@ A pixel-art desktop companion running on M5Stack Cardputer (ESP32-S3). Features 
 - **Real-Time Weather** — Fetches weather from Open-Meteo API every 15 minutes. Background effects for rain, drizzle, snow, fog, and thunderstorms. Pet wears weather-appropriate accessories (sunglasses, umbrella, snow hat, mask). Temperature displayed next to the clock.
 - **Weather Simulation** — Fn+W toggles simulation mode, number keys 1-8 to preview all 8 weather types (Clear, Cloudy, Overcast, Fog, Drizzle, Rain, Snow, Thunder).
 - **Chat Mode** — Full keyboard input, AI conversation with SSE streaming (token-by-token display), scrollable message history with word-wrap.
+- **Pixel Art Generation** — `/draw a cat` generates 8x8 AI pixel art rendered as a 96x96 color grid in chat. `/draw16` for 16x16. 16-color palette, mixed with text messages, auto-syncs to Mac desktop.
 - **Voice Input** — Push-to-talk via Fn key, speech-to-text via Groq Whisper API (through a local proxy server).
 - **TTS Voice Replies** — AI responses are spoken through the built-in speaker. Press any key to interrupt playback. Mic and speaker share GPIO 43 — the system handles switching automatically.
-- **Desktop Pet Sync** — macOS companion app receives lobster state, position, and weather over UDP, rendering a synced desktop pet on your Mac.
+- **Desktop Pet Sync** — macOS companion app receives lobster state, position, and weather over UDP, rendering a synced desktop pet on your Mac. Supports Follow Mode (cursor tracking) and Scene Mode (weather panel).
+- **Desktop Bidirectional Control** — Mac ↔ ESP32 two-way communication. Remote trigger animations, send text/messages to Cardputer, forward notifications as toast overlays, view synced chat history, and display pixel art in a high-res popover. Pet perches on the Chat Viewer window when open.
 - **OpenClaw Integration** — Connects to your local OpenClaw Gateway over LAN. Multi-model fallback (Kimi/Claude/GPT/Gemini), persistent memory, 5400+ community skills.
 - **Dual WiFi + Offline Mode** — Auto-fallback to secondary WiFi (e.g. phone hotspot). Gateway host switches automatically. Offline mode if all WiFi fails (companion works, chat shows offline).
 - **Runtime Config** — Setup wizard to configure WiFi, Gateway, STT host at runtime. Build-time values as defaults, Fn+R to reset.
@@ -113,17 +115,38 @@ The lobster lives on a 240x135 pixel screen with a dynamic background:
 ### Chat Mode — AI Conversation
 
 - Type messages and press Enter to send. AI replies stream token-by-token with typing sound effects.
+- **Pixel art**: Type `/draw a cat` to generate an 8x8 pixel art, or `/draw16 a heart` for 16x16. AI returns hex-encoded pixel data, rendered as a 96x96 color grid inline with chat messages. 16-color fixed palette. Parse failures gracefully fall back to plain text.
 - **Voice input**: Hold Fn to record (up to 3 seconds), release to transcribe via Groq Whisper. A "Transcribing..." progress bar is shown during processing. Transcription fills the input bar.
 - **TTS**: After AI replies, the response is spoken through the built-in speaker. A "Speaking..." indicator is shown during audio download. Press any key to stop playback.
 - **Scrolling**: Use Fn+; to scroll up and Fn+/ to scroll down through message history.
 - **Offline mode**: If WiFi is not connected, sending a message shows `[Offline] No network connection`.
 
-### Desktop Pet Sync
+### Desktop Pet Sync & Bidirectional Control
 
-- A macOS Swift app (`desktop/CardputerDesktopPet/`) receives the pet's state, position, weather, and temperature via UDP broadcast.
-- **Follow Mode** (default): transparent sprite follows your cursor around the desktop, with weather accessories synced.
-- **Scene Mode**: a 360×200 pixel weather scene panel anchored below the menu bar 🦞 icon — complete with sky (day/dusk/night), celestials (sun/moon/stars/clouds), weather particles (rain/snow/fog/thunder), ground with clock and temperature display. Time-travel works: the sprite's X position shifts the sky ±12 hours.
-- Switch modes from the menu bar 🦞 dropdown.
+A macOS Swift app (`desktop/CardputerDesktopPet/`) communicates with the Cardputer over the local network.
+
+**ESP32 → Mac (UDP 19820):**
+- Pet state, position, weather, and temperature broadcast at 5Hz
+- Pixel art data synced on generation — pops up a 256x256 high-res popover with history browsing
+- Chat messages synced in real-time to the Chat Viewer window
+
+**Mac → ESP32 (UDP 19822):**
+- **Trigger animations**: happy, idle, sleep, talk — from the menu bar Control submenu
+- **Send text**: type on Mac, appears in Cardputer's chat input
+- **Send message**: type and auto-send (equivalent to pressing Enter)
+- **Forward notifications**: send toast overlays (app name, title, body) displayed for 3 seconds on Cardputer
+- **Request chat history**: pull full conversation log
+
+**Display modes:**
+- **Follow Mode** (default): transparent sprite follows your cursor, with weather accessories synced. Pet perches on top of the Chat Viewer window when it's open.
+- **Scene Mode**: a 360x200 pixel weather scene panel anchored below the menu bar icon.
+- Switch modes from the menu bar dropdown.
+
+**Building the desktop app:**
+```bash
+cd desktop/CardputerDesktopPet && ./run.sh
+```
+This builds the Swift app, wraps it in a `.app` bundle with `Info.plist` (required for macOS local network permissions), ad-hoc signs it, and launches via `open`.
 
 ### Networking & Config
 
@@ -138,18 +161,31 @@ The lobster lives on a 240x135 pixel screen with a dynamic background:
 src/
 ├── main.cpp              # Entry point, mode dispatch, WiFi/NTP
 ├── companion.h/cpp       # Companion mode: animations, state machine, clock, weather effects
-├── chat.h/cpp            # Chat mode: messages, input bar, scrolling
-├── ai_client.h/cpp       # AI client (OpenClaw/Claude), SSE streaming
+├── chat.h/cpp            # Chat mode: messages, input bar, scrolling, pixel art rendering
+├── ai_client.h/cpp       # AI client (OpenClaw/Claude), SSE streaming, /draw prompt routing
 ├── voice_input.h/cpp     # Push-to-talk recording, WAV encoding, STT proxy client
 ├── tts_playback.h/cpp    # TTS voice replies, PCM download and DMA playback
 ├── weather_client.h/cpp  # Open-Meteo weather API, geocoding, 15-min auto refresh
-├── state_broadcast.h/cpp # UDP state broadcast for desktop pet sync
+├── state_broadcast.h/cpp # UDP state broadcast + one-shot pixel art / chat sync
+├── cmd_server.h/cpp      # Command server (TCP 19821 + UDP 19822) for Mac→ESP32 control
 ├── sprites.h             # Pixel lobster sprites (RGB565)
 ├── config.h/cpp          # WiFi/API config, NVS persistence
 └── utils.h               # Colors, screen constants, Timer
 
 desktop/
-└── CardputerDesktopPet/  # macOS desktop pet (Swift, receives UDP state)
+└── CardputerDesktopPet/
+    ├── Sources/
+    │   ├── main.swift            # Entry point
+    │   ├── AppDelegate.swift     # Menu bar, mode switching, control commands, perch logic
+    │   ├── UDPListener.swift     # UDP receiver with source IP extraction
+    │   ├── TCPSender.swift       # UDP command sender (Mac→ESP32)
+    │   ├── PetBehavior.swift     # Movement, follow mode, perch target
+    │   ├── PetWindow.swift       # Transparent pet sprite window
+    │   ├── SceneWindow.swift     # Weather scene panel
+    │   ├── PixelArtPopover.swift # Floating 256x256 pixel art display
+    │   └── ChatViewerWindow.swift # Chat history viewer + remote send
+    ├── Info.plist                # App bundle metadata + network permissions
+    └── run.sh                    # Build, bundle, sign, and launch script
 
 tools/
 └── stt_proxy.py          # Local HTTP proxy: ESP32 audio → Groq Whisper API + TTS
@@ -202,6 +238,8 @@ See [OpenClaw Research](docs/openclaw-research.md) for the full integration guid
 - [Voice Input Design](docs/voice-input-design.md)
 - [Desktop Pet Design](docs/desktop-pet-design.md)
 - [UDP State Sync Design](docs/udp-state-sync-design.md)
+- [Pixel Art Design](docs/pixel-art-design.md)
+- [Desktop Bidirectional Design](docs/desktop-bidirectional-design.md)
 - [ESP32 Memory Lessons](docs/esp32-voice-chat-lessons.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Roadmap](docs/roadmap.md)
@@ -216,6 +254,8 @@ See [OpenClaw Research](docs/openclaw-research.md) for the full integration guid
 - [x] Pet movement + time-travel sky + desktop position sync
 - [x] Real-time weather (Open-Meteo API + background effects + accessories)
 - [x] Weather simulation mode (Fn+W + 1-8 to preview all weather types)
+- [x] Pixel art generation (/draw command with 8x8 and 16x16 support)
+- [x] Desktop bidirectional control (Mac ↔ ESP32 commands, chat sync, pixel art sync, notifications)
 - [ ] Battery display with low-power character animation
 - [ ] Chat history persistence (NVS/SD card)
 - [ ] Pet system (hunger/mood mechanics)

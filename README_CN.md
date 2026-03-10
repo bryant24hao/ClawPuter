@@ -10,9 +10,11 @@ M5Stack Cardputer (ESP32-S3) 上的像素风桌面伴侣。小龙虾角色 + 动
 - **实时天气** — 每 15 分钟从 Open-Meteo 获取天气数据（免费，无需 API Key）。根据天气类型显示雨滴、雪花、雾气、雷电闪光等背景特效。宠物自动佩戴天气配饰（墨镜、雨伞、雪帽、口罩）。时钟旁显示实时温度。
 - **天气模拟** — Fn+W 切换模拟模式，数字键 1-8 预览全部 8 种天气类型（晴天、多云、阴天、雾、小雨、大雨、雪、雷暴）。
 - **聊天模式** — 键盘输入，AI 对话支持 SSE 流式响应（逐字显示），消息自动换行和翻页滚动。
+- **像素画生成** — `/draw a cat` 生成 8x8 AI 像素画，渲染为 96x96 彩色网格嵌入聊天。`/draw16` 生成 16x16。16 色固定调色板，自动同步到 Mac 桌面。
 - **语音输入** — 按住 Fn 键说话（最长 3 秒），松开后通过 Groq Whisper API 语音转文字，识别结果自动填入输入栏。
 - **TTS 语音回复** — AI 回复通过扬声器朗读。按任意键可中断播放。麦克风和扬声器共享 GPIO 43，系统自动切换。
-- **桌面宠物同步** — macOS 端桌面宠物应用，通过 UDP 接收小龙虾状态、位置和天气信息，实时同步动画。在 Cardputer 上移动宠物，桌面上也跟着动。
+- **桌面宠物同步** — macOS 端桌面宠物应用，通过 UDP 接收小龙虾状态、位置和天气信息，实时同步动画。支持跟随模式（跟踪光标）和场景模式（天气面板）。
+- **桌面双向控制** — Mac ↔ ESP32 双向通信。远程触发动画、发送文字/消息到 Cardputer、转发通知为 Toast 叠加层、查看同步聊天历史、弹窗展示高清像素画。宠物在 Chat Viewer 打开时自动停靠在窗口顶部。
 - **OpenClaw 集成** — 局域网连接本地 OpenClaw Gateway。多模型自动切换（Kimi/Claude/GPT/Gemini），持久记忆，5400+ 社区技能。
 - **双 WiFi + 离线模式** — 主 WiFi 连不上自动尝试备用（手机热点），Gateway IP 自动切换。所有 WiFi 都失败可进入离线模式（伴侣模式正常可用，聊天显示离线提示）。
 - **运行时配置** — Setup 向导支持运行时修改 WiFi、Gateway、STT Host，编译时值作为默认，Fn+R 重置。
@@ -113,14 +115,37 @@ pio device monitor
 ### 聊天模式 — AI 对话
 
 - 键盘输入消息，Enter 发送。AI 回复逐字流式显示，配打字音效。
+- **像素画**：输入 `/draw a cat` 生成 8x8 像素画，或 `/draw16 a heart` 生成 16x16。AI 返回十六进制编码的像素数据，渲染为 96x96 彩色网格嵌入聊天消息。16 色固定调色板，解析失败自动降级为普通文字。
 - **语音输入**：按住 Fn 录音（最长 3 秒），松开后发送到 Groq Whisper 转文字。转写过程中显示 "Transcribing..." 进度条。
 - **TTS 语音回复**：AI 回复完成后，通过扬声器朗读回复内容。按任意键可中断播放。
 - **离线模式**：未连接 WiFi 时，发送消息显示 `[Offline] No network connection`。
 
-### 桌面宠物同步
+### 桌面宠物同步与双向控制
 
-- macOS Swift 应用（`desktop/CardputerDesktopPet/`）通过 UDP 广播接收宠物状态、位置和天气。
-- 在 Cardputer 上移动宠物 → 桌面宠物同步移动。动画状态实时同步。
+macOS Swift 应用（`desktop/CardputerDesktopPet/`）通过局域网与 Cardputer 双向通信。
+
+**ESP32 → Mac（UDP 19820）：**
+- 宠物状态、位置、天气 5Hz 广播同步
+- 像素画生成后自动弹出 256x256 高清窗口，支持历史浏览
+- 聊天消息实时同步到 Chat Viewer 窗口
+
+**Mac → ESP32（UDP 19822）：**
+- **触发动画**：开心、待机、睡觉、说话 — 从菜单栏 Control 子菜单触发
+- **发送文字**：在 Mac 输入，出现在 Cardputer 聊天输入框
+- **发送消息**：输入并自动发送（相当于按 Enter）
+- **转发通知**：发送 Toast 叠加层（应用名、标题、内容），Cardputer 屏幕顶部显示 3 秒
+- **请求聊天历史**：拉取完整对话记录
+
+**显示模式：**
+- **跟随模式**（默认）：透明精灵跟随光标，天气配饰同步。Chat Viewer 打开时宠物自动停靠在窗口顶部。
+- **场景模式**：菜单栏下方 360x200 像素天气场景面板。
+- 从菜单栏下拉菜单切换模式。
+
+**构建桌面应用：**
+```bash
+cd desktop/CardputerDesktopPet && ./run.sh
+```
+自动编译 Swift 应用、打包为 `.app` bundle（含 `Info.plist`，macOS 本地网络权限所需）、Ad-hoc 签名、通过 `open` 启动。
 
 ### 联网与配置
 
@@ -135,18 +160,31 @@ pio device monitor
 src/
 ├── main.cpp              # 入口，模式调度，WiFi/NTP
 ├── companion.h/cpp       # 伴侣模式：动画、状态机、时钟、天气特效
-├── chat.h/cpp            # 聊天模式：消息气泡、输入栏、滚动
-├── ai_client.h/cpp       # AI 客户端（OpenClaw/Claude），SSE 流式响应
+├── chat.h/cpp            # 聊天模式：消息气泡、输入栏、滚动、像素画渲染
+├── ai_client.h/cpp       # AI 客户端（OpenClaw/Claude），SSE 流式响应，/draw prompt 路由
 ├── voice_input.h/cpp     # 按键说话录音、WAV 编码、STT 代理客户端
 ├── tts_playback.h/cpp    # TTS 语音回复，PCM 下载 + DMA 播放
 ├── weather_client.h/cpp  # Open-Meteo 天气 API、地理编码、15 分钟自动刷新
-├── state_broadcast.h/cpp # UDP 状态广播，桌面宠物同步
+├── state_broadcast.h/cpp # UDP 状态广播 + 一次性像素画/聊天消息同步
+├── cmd_server.h/cpp      # 命令服务器（TCP 19821 + UDP 19822），Mac→ESP32 控制
 ├── sprites.h             # 像素小龙虾素材（RGB565）
 ├── config.h/cpp          # WiFi/API 配置，NVS 持久化
 └── utils.h               # 颜色定义、屏幕常量、定时器
 
 desktop/
-└── CardputerDesktopPet/  # macOS 桌面宠物（Swift，接收 UDP 状态同步）
+└── CardputerDesktopPet/
+    ├── Sources/
+    │   ├── main.swift            # 入口
+    │   ├── AppDelegate.swift     # 菜单栏、模式切换、控制命令、停靠逻辑
+    │   ├── UDPListener.swift     # UDP 接收器，提取源 IP
+    │   ├── TCPSender.swift       # UDP 命令发送（Mac→ESP32）
+    │   ├── PetBehavior.swift     # 移动逻辑、跟随模式、停靠目标
+    │   ├── PetWindow.swift       # 透明宠物精灵窗口
+    │   ├── SceneWindow.swift     # 天气场景面板
+    │   ├── PixelArtPopover.swift # 浮动 256x256 像素画展示
+    │   └── ChatViewerWindow.swift # 聊天历史查看器 + 远程发送
+    ├── Info.plist                # 应用 bundle 元数据 + 网络权限
+    └── run.sh                    # 编译、打包、签名、启动脚本
 
 tools/
 └── stt_proxy.py          # 本地 HTTP 代理：ESP32 音频 → Groq Whisper API + TTS
@@ -199,6 +237,8 @@ tools/
 - [语音输入设计](docs/voice-input-design.md)
 - [桌面宠物设计](docs/desktop-pet-design.md)
 - [UDP 状态同步设计](docs/udp-state-sync-design.md)
+- [像素画设计](docs/pixel-art-design.md)
+- [桌面双向通信设计](docs/desktop-bidirectional-design.md)
 - [ESP32 内存踩坑记录](docs/esp32-voice-chat-lessons.md)
 - [问题排查](docs/troubleshooting.md)
 - [路线图](docs/roadmap.md)
@@ -213,6 +253,8 @@ tools/
 - [x] 宠物移动 + 时光倒流天空 + 桌面位置同步
 - [x] 实时天气（Open-Meteo API + 背景特效 + 宠物配饰）
 - [x] 天气模拟模式（Fn+W + 1-8 预览全部天气类型）
+- [x] 像素画生成（/draw 命令，支持 8x8 和 16x16）
+- [x] 桌面双向控制（Mac ↔ ESP32 命令、聊天同步、像素画同步、通知转发）
 - [ ] 电量显示 + 低电量角色变虚弱
 - [ ] 聊天历史持久化（NVS/SD 卡）
 - [ ] 养成系统（饥饿值/心情值）

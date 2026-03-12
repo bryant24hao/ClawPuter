@@ -127,6 +127,30 @@ ESP32 上 HTTPS 比较慢：
 [AI]    — API 请求全过程（连接、发送、响应、解析）
 ```
 
+## 桌面宠物相关
+
+### Desktop Pet 显示 "No ESP32 Connected" / "ESP32: Waiting..."
+
+桌面端收不到 Cardputer 的 UDP 广播。按优先级排查：
+
+1. **不在同一个网络** — 最常见原因。Mac 和 Cardputer 必须连接同一个 WiFi（同一个路由器/热点）。检查 Mac WiFi 名称和 Cardputer 串口日志中的 SSID 是否一致。
+2. **macOS 本地网络权限未授权** — 系统设置 → 隐私与安全性 → 本地网络，确认 ClawPuter 开关已打开。如果列表中没有，退出 app 重新打开，等待权限弹窗。
+3. **macOS 防火墙** — 系统设置 → 网络 → 防火墙，如果开启了，确保允许传入连接。
+4. **Cardputer 未联网** — 检查 Cardputer 屏幕是否显示已连接 WiFi。如果卡在 "Connecting..."，检查 WiFi 配置（Fn+R 重新设置）。
+
+### Desktop Pet 编译报 PCH / module cache 错误
+
+```
+PCH was compiled with module cache path '...' but the path is currently '...'
+```
+
+项目目录改名或移动后，Swift 编译缓存失效。清除 `.build` 目录重新编译：
+
+```bash
+rm -rf ~/ClawPuter/desktop/CardputerDesktopPet/.build
+cd ~/ClawPuter/desktop/CardputerDesktopPet && ./run.sh
+```
+
 ## 屏幕相关
 
 ### 屏幕闪烁

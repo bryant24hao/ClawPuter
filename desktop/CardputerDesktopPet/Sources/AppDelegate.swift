@@ -201,7 +201,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(connectionIndicator!)
 
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Quit Pixel Lobster", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit ClawPuter", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
         statusItem.menu = menu
     }

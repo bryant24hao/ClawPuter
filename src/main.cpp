@@ -377,6 +377,7 @@ void loop() {
                     }
 
                     // Broadcast pixel art to desktop if one was just parsed
+                    bool hasPixelArt = chat.hasNewPixelArt() || isDrawCmd;
                     if (chat.hasNewPixelArt()) {
                         char rows[16][17];
                         int paSize = chat.getLastPixelArtRows(rows, 16);
@@ -389,7 +390,7 @@ void loop() {
                     }
 
                     // TTS: speak the AI response (skip for pixel art)
-                    if (!aiError && !isDrawCmd && aiClient.getLastResponse().length() > 0) {
+                    if (!aiError && !hasPixelArt && aiClient.getLastResponse().length() > 0) {
                         // Show "Speaking..." indicator while downloading PCM
                         chat.update(canvas);
                         ttsPlayback.drawSpeakingBar(canvas);

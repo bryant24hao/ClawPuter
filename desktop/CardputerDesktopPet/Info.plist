@@ -5,7 +5,7 @@
     <key>CFBundleIdentifier</key>
     <string>com.cardputer.desktoppet</string>
     <key>CFBundleName</key>
-    <string>Pixel Lobster</string>
+    <string>ClawPuter</string>
     <key>CFBundleExecutable</key>
     <string>CardputerDesktopPet</string>
     <key>CFBundlePackageType</key>
@@ -17,6 +17,6 @@
     <key>LSUIElement</key>
     <true/>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>Pixel Lobster needs local network access to communicate with your Cardputer device.</string>
+    <string>ClawPuter needs local network access to communicate with your Cardputer device.</string>
 </dict>
 </plist>

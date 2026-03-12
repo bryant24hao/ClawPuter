@@ -148,10 +148,22 @@ void Chat::appendAIToken(const char* token) {
 }
 
 void Chat::onAIResponseComplete() {
-    // Try to parse pixel art from the last AI message
-    if (drawMode && messageCount > 0) {
+    // Try to parse pixel art from the last AI message —
+    // always check for [PIXELART:] tags, not just /draw commands.
+    // AI may return pixel art spontaneously in conversation.
+    if (messageCount > 0) {
         int idx = (messageCount - 1) % MAX_MESSAGES;
-        parsePixelArtResponse(idx);
+        Message& msg = messages[idx];
+        if (!msg.isUser && msg.text.indexOf("[PIXELART:") >= 0) {
+            // Auto-detect size from tag if not set by /draw command
+            if (!drawMode) {
+                int tagPos = msg.text.indexOf("[PIXELART:");
+                int sizeVal = msg.text.substring(tagPos + 10).toInt();
+                if (sizeVal == 16) drawSize = 16;
+                else drawSize = 8;
+            }
+            parsePixelArtResponse(idx);
+        }
     }
     drawMode = false;
 

@@ -862,7 +862,7 @@ void playBootAnimation(M5Canvas& canvas) {
     canvas.setTextColor(Color::CLOCK_TEXT);
     canvas.setTextSize(1);
     int textY = (SCREEN_H + CHAR_H * 5) / 2 - 2;
-    const char* title = "Pixel Companion";
+    const char* title = "ClawPuter";
     int tw = canvas.textWidth(title);
     canvas.drawString(title, (SCREEN_W - tw) / 2, textY);
     canvas.pushSprite(0, 0);

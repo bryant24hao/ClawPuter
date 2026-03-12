@@ -31,7 +31,7 @@ desktop/CardputerDesktopPet/
     └── PetBehavior.swift         # 状态机 + 光标跟随逻辑
 ```
 
-放在 `CardputerCompanion/desktop/` 目录下，与固件同仓库。
+放在 `ClawPuter/desktop/` 目录下，与固件同仓库。
 
 ## 实现步骤
 

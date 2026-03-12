@@ -1,4 +1,4 @@
-# Cardputer Companion 🦞
+# ClawPuter 🦞
 
 [English](README.md)
 

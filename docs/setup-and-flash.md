@@ -44,7 +44,7 @@ export CLAUDE_API_KEY="你的API Key"
 ## 编译
 
 ```bash
-cd CardputerCompanion
+cd ClawPuter
 pio run
 ```
 

@@ -1,6 +1,6 @@
 # ESP32 语音聊天开发踩坑记录与原则
 
-> CardputerCompanion 项目在 M5Cardputer (ESP32-S3, 无 PSRAM, 328KB SRAM) 上实现语音输入 + AI 流式聊天的完整踩坑记录。
+> ClawPuter 项目在 M5Cardputer (ESP32-S3, 无 PSRAM, 328KB SRAM) 上实现语音输入 + AI 流式聊天的完整踩坑记录。
 > 初版: 2026-03-03 | 更新: 2026-03-03（坑 7: 按需分配的碎片化陷阱）
 
 ---

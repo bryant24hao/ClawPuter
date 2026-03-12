@@ -1,4 +1,4 @@
-# Contributing to Cardputer Companion
+# Contributing to ClawPuter
 
 Thanks for your interest! Here's how to contribute.
 

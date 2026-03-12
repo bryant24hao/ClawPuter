@@ -94,7 +94,7 @@ OpenClaw 原生支持 [MCP](https://safeclaw.io/blog/openclaw-mcp)，在 `opencl
 
 MCP server 作为独立进程运行，通过 JSON-RPC 2.0 与 OpenClaw 通信，暴露的工具可被任何 agent 调用。
 
-## CardputerCompanion × OpenClaw 集成方案
+## ClawPuter × OpenClaw 集成方案
 
 ### 方案 A：Cardputer 作为 OpenClaw 的物理终端（推荐起步）✅ 已验证可行
 

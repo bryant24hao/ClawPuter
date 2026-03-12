@@ -4,6 +4,10 @@
 
 M5Stack Cardputer (ESP32-S3) 上的像素风桌面伴侣。小龙虾角色 + 动画 + 实时天气 + AI 聊天 + 语音输入/TTS + macOS 桌面宠物同步。
 
+## 为什么叫 "ClawPuter"？
+
+有天下午去朋友的办公室，聊起了 [OpenClaw](https://github.com/openclaw)，我也提到最近对硬件比较感兴趣。刚好朋友手边有一台 M5Stack **Cardputer**，就借给我玩。那个下午，一个想法就成型了：能不能把 OpenClaw 这样的数字生命，以更具身的形式呈现出来？Cardputer 是一个完美的载体。于是把两个名字拼在了一起：**Claw**（来自 OpenClaw）+ Card**puter** = **ClawPuter**。
+
 ## 功能
 
 - **伴侣模式** — 像素小龙虾，支持待机、开心、睡觉、说话、伸懒腰、东张西望等动画。键盘方向键移动（按住持续走）。时光倒流天空（向左走=过去，向右走=未来）。NTP 时钟显示。

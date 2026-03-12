@@ -4,6 +4,10 @@
 
 A pixel-art desktop companion running on M5Stack Cardputer (ESP32-S3). Features an OpenClaw-themed lobster character with animations, real-time weather, AI chat with voice input/TTS, and a synced macOS desktop pet.
 
+## Why "ClawPuter"?
+
+The idea started one afternoon at a friend's office. We were chatting about [OpenClaw](https://github.com/openclaw) and I mentioned I'd been getting into hardware lately. He happened to have an M5Stack **Cardputer** lying around and lent it to me. That same afternoon, the concept clicked: what if we gave OpenClaw — a digital life — a more embodied, physical form? The Cardputer was the perfect vessel. So I mashed the names together: **Claw** (from OpenClaw) + Card**puter** = **ClawPuter**.
+
 ## Features
 
 - **Companion Mode** — Pixel lobster with idle, happy, sleep, talk, stretch, and look-around animations. Movable with keyboard (hold to walk). Day/night background with time-travel sky (walk left = past, right = future). NTP clock display.

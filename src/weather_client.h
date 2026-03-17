@@ -15,6 +15,7 @@ enum class WeatherType : uint8_t {
 
 struct WeatherData {
     float temperature = 0;
+    int humidity = 0;       // relative humidity %
     WeatherType type = WeatherType::UNKNOWN;
     bool isDay = true;
     bool valid = false;

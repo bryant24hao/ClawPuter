@@ -198,7 +198,7 @@ bool WeatherClient::fetchWeather() {
     char path[192];
     snprintf(path, sizeof(path),
         "/v1/forecast?latitude=%.2f&longitude=%.2f"
-        "&current=temperature_2m,weather_code,is_day&timezone=auto",
+        "&current=temperature_2m,relative_humidity_2m,weather_code,is_day&timezone=auto",
         lat, lon);
 
     client.printf("GET %s HTTP/1.1\r\n", path);
@@ -238,14 +238,15 @@ bool WeatherClient::fetchWeather() {
     }
 
     data.temperature = current["temperature_2m"] | 0.0f;
+    data.humidity = current["relative_humidity_2m"] | 0;
     int code = current["weather_code"] | 0;
     data.isDay = (current["is_day"] | 1) != 0;
     data.type = codeToType(code);
     data.valid = true;
     lastUpdate = millis();
 
-    Serial.printf("[WEATHER] %.1f C, code=%d, type=%d, day=%d\n",
-                  data.temperature, code, (int)data.type, data.isDay);
+    Serial.printf("[WEATHER] %.1f C, %d%% RH, code=%d, type=%d, day=%d\n",
+                  data.temperature, data.humidity, code, (int)data.type, data.isDay);
     return true;
 }
 

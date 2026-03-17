@@ -45,6 +45,12 @@ public:
     void setInput(const String& text);
     const String& getInput() const { return inputBuffer; }
 
+    // Moisture level for dehydration lock
+    void setMoistureLevel(int level) { moistureLevel = level; }
+
+    // Thinking model indicator
+    void setAIThinking(bool thinking) { aiThinking = thinking; }
+
     // Check if last user message was a /draw command (for AI prompt routing)
     bool isDrawCommand() const { return drawMode; }
     int getDrawSize() const { return drawSize; }
@@ -90,6 +96,9 @@ private:
     bool waitingForAI = false;
     bool initialized = false;
     bool userScrolled = false; // user manually scrolled up
+
+    int moistureLevel = 2;  // synced from companion every frame
+    bool aiThinking = false;
 
     // /draw command state
     bool drawMode = false;

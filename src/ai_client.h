@@ -30,7 +30,21 @@ public:
     // Last AI response text (for TTS playback)
     const String& getLastResponse() const { return lastResponse; }
 
+    // Companion state for dynamic system prompt
+    struct CompanionContext {
+        int moisture = 4;
+        int weatherType = -1;
+        float temperature = -999;
+        int humidity = -1;
+    };
+    void setCompanionContext(const CompanionContext& ctx) { companionCtx = ctx; }
+    void clearHistory() { historyCount = 0; }
+
+    // Thinking model support: set when model streams thinking content
+    bool thinkingDetected = false;
+
 private:
+    CompanionContext companionCtx;
     String lastResponse;
     String apiKey;
     String gwHost;

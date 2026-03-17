@@ -9,8 +9,8 @@ class UDPListener {
     /// The ESP32's IP address, extracted from UDP source — used by TCPSender
     private(set) var esp32Address: String?
 
-    /// Callback: (state, frameIndex, appMode, normX, normY, direction, weatherType, temperature) — called on main queue
-    var onStateReceived: ((Int, Int, String, Float?, Float?, Int?, Int?, Float?) -> Void)?
+    /// Callback: (state, frameIndex, appMode, normX, normY, direction, weatherType, temperature, moisture, humidityPercent) — called on main queue
+    var onStateReceived: ((Int, Int, String, Float?, Float?, Int?, Int?, Float?, Int?, Int?) -> Void)?
 
     /// Callback: pixel art data received — (size, rows) — called on main queue
     var onPixelArtReceived: ((Int, [String]) -> Void)?
@@ -155,10 +155,12 @@ class UDPListener {
         let direction = json["d"] as? Int
         let weatherType = json["w"] as? Int
         let temperature = (json["t"] as? NSNumber)?.floatValue
+        let moisture = json["h"] as? Int
+        let humidityPct = json["rh"] as? Int
 
         let callback = onStateReceived
         DispatchQueue.main.async {
-            callback?(state, frame, mode, normX, normY, direction, weatherType, temperature)
+            callback?(state, frame, mode, normX, normY, direction, weatherType, temperature, moisture, humidityPct)
         }
     }
 }

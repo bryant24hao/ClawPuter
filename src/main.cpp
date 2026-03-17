@@ -187,6 +187,11 @@ void loop() {
                     companion.toggleWeatherSim();
                     break;
                 }
+                // Fn+0 = debug: set moisture to 0
+                if (ks.fn && ks.word.size() > 0 && ks.word[0] == '0') {
+                    companion.debugSetMoisture(0);
+                    break;
+                }
                 // Fn+R = reset config
                 if (ks.fn && ks.word.size() > 0 && ks.word[0] == 'r') {
                     WiFi.disconnect(true);
@@ -203,6 +208,10 @@ void loop() {
                         companion.setSimWeatherType(ch - '0');
                         break;
                     }
+                }
+                // H key: spray water
+                if (ks.word.size() > 0 && ks.word[0] == 'h') {
+                    companion.spray();
                 }
                 // Non-movement keys → companion handles (space/enter for happy, etc.)
                 char key = 0;
@@ -316,7 +325,12 @@ void loop() {
                     } else if (ks.fn && key == '/') {
                         chat.scrollDown();
                     } else if (!ks.fn) {
-                        chat.handleKey(key);
+                        // H key: spray when thirsty, type normally otherwise
+                        if (key == 'h' && companion.getMoistureLevel() <= 1) {
+                            companion.spray();
+                        } else {
+                            chat.handleKey(key);
+                        }
                     }
                 }
             }
@@ -340,6 +354,14 @@ void loop() {
                     bool isDrawCmd = chat.isDrawCommand();
                     int drawSz = chat.getDrawSize();
                     aiClient.setPixelArtMode(isDrawCmd, drawSz);
+
+                    // Update AI with companion state
+                    AIClient::CompanionContext ctx;
+                    ctx.moisture = companion.getMoistureLevel();
+                    ctx.weatherType = static_cast<int>(companion.getWeatherType());
+                    ctx.temperature = companion.getTemperature();
+                    ctx.humidity = companion.getHumidityPercent();
+                    aiClient.setCompanionContext(ctx);
 
                     bool aiError = false;
                     aiClient.sendMessage(msg,
@@ -419,7 +441,9 @@ void loop() {
                 Serial.println("[TTS] Playback interrupted by key press");
             }
 
-            // ── Draw ──
+            // ── Sync state + Draw ──
+            chat.setMoistureLevel(companion.getMoistureLevel());
+            chat.setAIThinking(aiClient.thinkingDetected);
             chat.update(canvas);
             // Override input bar if recording, transcribing, or speaking
             if (voiceInput.isRecording()) {
@@ -447,7 +471,8 @@ void loop() {
         stateBroadcastTick(static_cast<int>(companion.getState()),
                            companion.getFrameIndex(), modeStr,
                            companion.getNormX(), companion.getNormY(),
-                           companion.isFacingLeft() ? 1 : 0, wType, temp);
+                           companion.isFacingLeft() ? 1 : 0, wType, temp,
+                           companion.getMoistureLevel(), companion.getHumidityPercent());
     }
 
     delay(16); // ~60fps cap

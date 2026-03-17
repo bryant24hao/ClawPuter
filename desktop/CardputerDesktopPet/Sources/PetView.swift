@@ -11,6 +11,8 @@ class PetView: NSView {
     var sceneMode: Bool = false
     var spriteNormX: CGFloat = 0.5  // 0=left, 1=right; used in scene mode for position + time-travel
     var temperature: Float?  // from ESP32, nil when not connected
+    var moisture: Int?       // 0-4 moisture level from ESP32
+    var humidityPercent: Int?  // real humidity % from ESP32
     private var sleepStartTime: TimeInterval = 0
 
     override var isFlipped: Bool { false }
@@ -111,6 +113,10 @@ class PetView: NSView {
         if petState == .sleep {
             drawSleepZ()
         }
+
+        if let m = moisture, m <= 1, petState != .sleep {
+            drawWaterBubble()
+        }
     }
 
     // MARK: - Scene mode (full weather scene)
@@ -167,7 +173,10 @@ class PetView: NSView {
             drawSleepZ()
         }
 
-        // 10. Thunder flash (topmost)
+        // 10. Top status bar (status text + moisture drops)
+        drawTopStatusBar()
+
+        // 11. Thunder flash (topmost)
         if weatherType == 7 {
             drawThunderFlash(now: now)
         }
@@ -454,14 +463,69 @@ class PetView: NSView {
         if let t = temperature {
             displayText += " | \(Int(roundf(t)))°"
         }
+        if let rh = humidityPercent {
+            displayText += " | \(rh)%"
+        }
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .medium),
             .foregroundColor: NSColor(red: 180/255, green: 180/255, blue: 200/255, alpha: 1)
         ]
         let size = displayText.size(withAttributes: attrs)
-        let x = (bounds.width - size.width) / 2
+        let startX = (bounds.width - size.width) / 2
         let y = (groundHeight - size.height) / 2
-        displayText.draw(at: NSPoint(x: x, y: y), withAttributes: attrs)
+        displayText.draw(at: NSPoint(x: startX, y: y), withAttributes: attrs)
+    }
+
+    private func drawTopStatusBar() {
+        let dimColor = NSColor(red: 180/255, green: 180/255, blue: 200/255, alpha: 0.8)
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: 9, weight: .medium),
+            .foregroundColor: dimColor
+        ]
+        let topY = bounds.height - 16  // top of scene view (flipped coords: high Y = top)
+
+        // Left: status text
+        if let m = moisture {
+            let statusStr: String
+            if m == 0 { statusStr = "so thirsty..." }
+            else if m == 1 { statusStr = "need water..." }
+            else { statusStr = "" }
+            if !statusStr.isEmpty {
+                statusStr.draw(at: NSPoint(x: 6, y: topY), withAttributes: attrs)
+            }
+        }
+
+        // Right: moisture drops
+        if let m = moisture {
+            let dropW: CGFloat = 6
+            let gap: CGFloat = 2
+            let totalDropsW = 4 * dropW + 3 * gap
+            let dropsX = bounds.width - totalDropsW - 6
+            drawMoistureDrops(m: m, x: dropsX, y: topY + 1, height: 10)
+        }
+    }
+
+    private func drawMoistureDrops(m: Int, x: CGFloat, y: CGFloat, height: CGFloat) {
+        let fillColor = NSColor(red: 80/255, green: 160/255, blue: 1, alpha: 1)
+        let emptyColor = NSColor(red: 60/255, green: 60/255, blue: 70/255, alpha: 0.6)
+        let dropW: CGFloat = 6
+        let dropH: CGFloat = 8
+        let gap: CGFloat = 2
+
+        // Blink when low
+        let blink = m <= 1 && Int(ProcessInfo.processInfo.systemUptime * 2) % 2 == 0
+
+        for i in 0..<4 {
+            let dx = x + CGFloat(i) * (dropW + gap)
+            let isFilled = i < m
+            var color = isFilled ? fillColor : emptyColor
+            if blink && isFilled { color = .white }
+
+            color.setFill()
+            // Simple teardrop: oval
+            let path = NSBezierPath(ovalIn: NSRect(x: dx, y: y, width: dropW, height: dropH))
+            path.fill()
+        }
     }
 
     // MARK: - Sleep Z
@@ -495,9 +559,47 @@ class PetView: NSView {
         }
     }
 
+    // MARK: - Water Bubble (low moisture indicator in follow mode)
+
+    private func drawWaterBubble() {
+        let elapsed = ProcessInfo.processInfo.systemUptime
+        let floatOffset = sin(elapsed * 2.5) * 4
+        let alpha: CGFloat = (moisture ?? 0) == 0 ?
+            (Int(elapsed * 3) % 2 == 0 ? 1.0 : 0.3) : 0.9
+
+        let color = NSColor(red: 80/255, green: 160/255, blue: 1, alpha: alpha)
+        let base = spriteRect.origin
+        let dropX = base.x + spriteSize / 2 - 5
+        let dropY = base.y + spriteSize + 8 + CGFloat(floatOffset)
+
+        color.setFill()
+        let path = NSBezierPath(ovalIn: NSRect(x: dropX, y: dropY, width: 10, height: 14))
+        path.fill()
+    }
+
+    // MARK: - Water Bottle (low moisture accessory)
+
+    private func drawWaterBottle(origin: NSPoint) {
+        let ox = origin.x
+        let oy = origin.y
+        let bottleColor = NSColor(red: 80/255, green: 160/255, blue: 1, alpha: 1)
+        let capColor = NSColor(red: 200/255, green: 200/255, blue: 220/255, alpha: 1)
+        let bx = facingLeft ? ox + spriteSize - 24 : ox + 8
+        let by = oy + spriteSize / 2 - 20
+        bottleColor.setFill()
+        NSRect(x: bx, y: by, width: 16, height: 22).fill()
+        capColor.setFill()
+        NSRect(x: bx + 3, y: by + 22, width: 10, height: 6).fill()
+    }
+
     // MARK: - Accessories
 
     private func drawAccessory(origin: NSPoint) {
+        if let m = moisture, m <= 1 {
+            drawWaterBottle(origin: origin)
+            return
+        }
+
         let ox = origin.x
         let oy = origin.y
 

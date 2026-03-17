@@ -16,6 +16,7 @@ The idea started one afternoon at a friend's office. We were chatting about [Ope
 ## Features
 
 - **Companion Mode** — Pixel lobster with idle, happy, sleep, talk, stretch, and look-around animations. Movable with keyboard (hold to walk). Day/night background with time-travel sky (walk left = past, right = future). NTP clock display.
+- **Moisture System** — Virtual hydration mechanic driven by real weather. Humidity affects decay speed, rain pauses decay, walking drains water faster. Press H to spray water and restore moisture. When dehydrated: movement slows, chat is locked, pet shows "so thirsty..." status. Water drop indicators in the top bar and on the desktop scene.
 - **Real-Time Weather** — Fetches weather from Open-Meteo API every 15 minutes. Background effects for rain, drizzle, snow, fog, and thunderstorms. Pet wears weather-appropriate accessories (sunglasses, umbrella, snow hat, mask). Temperature displayed next to the clock.
 - **Weather Simulation** — Fn+W toggles simulation mode, number keys 1-8 to preview all 8 weather types (Clear, Cloudy, Overcast, Fog, Drizzle, Rain, Snow, Thunder).
 - **Chat Mode** — Full keyboard input, AI conversation with SSE streaming (token-by-token display), scrollable message history with word-wrap.
@@ -24,6 +25,7 @@ The idea started one afternoon at a friend's office. We were chatting about [Ope
 - **TTS Voice Replies** — AI responses are spoken through the built-in speaker. Press any key to interrupt playback. Mic and speaker share GPIO 43 — the system handles switching automatically.
 - **Desktop Pet Sync** — macOS companion app receives lobster state, position, and weather over UDP, rendering a synced desktop pet on your Mac. Supports Follow Mode (cursor tracking) and Scene Mode (weather panel).
 - **Desktop Bidirectional Control** — Mac ↔ ESP32 two-way communication. Remote trigger animations, send text/messages to Cardputer, forward notifications as toast overlays, view synced chat history, and display pixel art in a high-res popover. Pet perches on the Chat Viewer window when open.
+- **Thinking Model Compatibility** — Works with reasoning models (GPT-5.4, Claude, etc.) that output extended thinking. Thinking content is automatically filtered, with a "thinking..." indicator shown during the thinking phase. Gateway fallback injection is detected and handled gracefully.
 - **OpenClaw Integration** — Connects to your local OpenClaw Gateway over LAN. Multi-model fallback (Kimi/Claude/GPT/Gemini), persistent memory, 5400+ community skills.
 - **Dual WiFi + Offline Mode** — Auto-fallback to secondary WiFi (e.g. phone hotspot). Gateway host switches automatically. Offline mode if all WiFi fails (companion works, chat shows offline).
 - **Runtime Config** — Setup wizard to configure WiFi, Gateway, STT host at runtime. Build-time values as defaults, Fn+R to reset.
@@ -94,9 +96,11 @@ pio device monitor
 | Fn (hold) | — | Push-to-talk voice input |
 | Fn + ; | — | Scroll up |
 | Fn + / | — | Scroll down |
+| H | Spray water (when moisture ≤ 1) | Spray water (when moisture ≤ 1), otherwise type 'h' |
 | Fn + W | Toggle weather simulation | — |
 | 1-8 (in weather sim) | Select weather type | — |
 | Fn + R | Reset config + setup wizard | — |
+| Fn + 0 | Debug: set moisture to 0 | — |
 | Any key (while sleeping) | Wake up lobster | — |
 | Any key (during TTS) | — | Stop voice playback |
 | TAB (in setup) | Exit setup, return to companion | — |
@@ -112,6 +116,19 @@ The lobster lives on a 240x135 pixel screen with a dynamic background:
 - **Spontaneous actions** — The pet randomly stretches or looks around every 8-15 seconds when idle. After 30 seconds of no interaction, it falls asleep with animated "Zzz". Press any key to wake it up.
 - **Keyboard movement** — Hold `,` `/` `;` `.` for continuous walking. The sprite flips to face the direction of movement.
 - **Interaction** — Press Space or Enter to make the pet jump happily with a cheerful melody.
+
+### Moisture System — Keep Your Lobster Hydrated
+
+A virtual hydration mechanic tied to real-world weather:
+
+- **4-level moisture indicator** shown in the top bar (water drops). Desktop scene mode mirrors the same indicator.
+- **Weather-driven decay**: low humidity (< 40%) = fast drain, high humidity (> 70%) = slow drain, rain/snow pauses decay entirely.
+- **Movement drain**: walking around costs moisture — every 20 steps drains 1 level. Stay still to conserve water.
+- **Spray water**: press H to restore 1 moisture level (3-second cooldown). Triggers a water spray particle animation and happy jump.
+- **Dehydration effects**: at moisture 1, movement slows to 50% and the pet shows "need water...". At moisture 0, the pet cannot move, cannot jump, chat mode is locked ("thirsty... press H to spray!"), and shows "so thirsty...".
+- **Water bottle accessory**: when moisture ≤ 1, the pet holds a tiny water bottle instead of weather accessories.
+- **Rain recovery**: during rain/thunderstorms, moisture auto-recovers +1 every 15 minutes.
+- **Initial moisture**: set based on first weather data — dry climate starts thirsty, humid climate starts comfortable.
 
 ### Weather — Real-Time & Simulated
 
@@ -265,9 +282,11 @@ See [OpenClaw Research](docs/openclaw-research.md) for the full integration guid
 - [x] Weather simulation mode (Fn+W + 1-8 to preview all weather types)
 - [x] Pixel art generation (/draw command with 8x8 and 16x16 support)
 - [x] Desktop bidirectional control (Mac ↔ ESP32 commands, chat sync, pixel art sync, notifications)
+- [x] Moisture system (hydration mechanic with weather linkage, spray interaction, movement drain)
+- [x] Thinking model compatibility (auto-filter thinking content, rolling timeout, fallback detection)
 - [ ] Battery display with low-power character animation
 - [ ] Chat history persistence (NVS/SD card)
-- [ ] Pet system (hunger/mood mechanics with bath/feed interactions)
+- [ ] Pet system expansion (hunger/mood mechanics, feeding interactions)
 - [ ] Pomodoro timer
 - [ ] BLE phone notifications
 - [ ] Professional pixel art upgrade (Stardew Valley style)

@@ -21,11 +21,18 @@ static void sendPacket(const char* buf, int len) {
     }
 }
 
-// Helper: send a UDP packet once via broadcast only (for one-shot messages like chat/pixelart)
+// Helper: send a UDP packet once (for one-shot messages like chat/pixelart)
+// Sends via both broadcast and unicast — iPhone hotspot blocks broadcast
 static void sendPacketOnce(const char* buf, int len) {
     udp.beginPacket("255.255.255.255", BROADCAST_PORT);
     udp.write((const uint8_t*)buf, len);
     udp.endPacket();
+
+    if (unicastHost[0]) {
+        udp.beginPacket(unicastHost, BROADCAST_PORT);
+        udp.write((const uint8_t*)buf, len);
+        udp.endPacket();
+    }
 }
 
 void stateBroadcastBegin(const char* target) {
@@ -38,19 +45,20 @@ void stateBroadcastBegin(const char* target) {
 
 void stateBroadcastTick(int state, int frame, const char* mode,
                         float normX, float normY, int direction,
-                        int weatherType, float temperature) {
+                        int weatherType, float temperature,
+                        int moisture, int humidity) {
     if (!broadcastTimer.tick()) return;
 
     char buf[128];
     int len;
     if (temperature > -999) {
         len = snprintf(buf, sizeof(buf),
-            "{\"s\":%d,\"f\":%d,\"m\":\"%s\",\"x\":%.2f,\"y\":%.2f,\"d\":%d,\"w\":%d,\"t\":%.1f}",
-            state, frame, mode, normX, normY, direction, weatherType, temperature);
+            "{\"s\":%d,\"f\":%d,\"m\":\"%s\",\"x\":%.2f,\"y\":%.2f,\"d\":%d,\"w\":%d,\"t\":%.1f,\"h\":%d,\"rh\":%d}",
+            state, frame, mode, normX, normY, direction, weatherType, temperature, moisture, humidity);
     } else {
         len = snprintf(buf, sizeof(buf),
-            "{\"s\":%d,\"f\":%d,\"m\":\"%s\",\"x\":%.2f,\"y\":%.2f,\"d\":%d,\"w\":%d}",
-            state, frame, mode, normX, normY, direction, weatherType);
+            "{\"s\":%d,\"f\":%d,\"m\":\"%s\",\"x\":%.2f,\"y\":%.2f,\"d\":%d,\"w\":%d,\"h\":%d,\"rh\":%d}",
+            state, frame, mode, normX, normY, direction, weatherType, moisture, humidity);
     }
 
     if (len >= (int)sizeof(buf)) len = sizeof(buf) - 1;

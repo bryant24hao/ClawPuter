@@ -92,6 +92,7 @@ void Chat::handleKey(char key) {
 }
 
 void Chat::handleEnter() {
+    if (moistureLevel == 0) return;  // too thirsty to chat
     if (inputBuffer.length() == 0 || waitingForAI) return;
 
     // Detect /draw commands before consuming input
@@ -325,9 +326,13 @@ void Chat::drawInputBar(M5Canvas& canvas) {
     canvas.setTextColor(Color::WHITE);
     canvas.setTextSize(1);
 
-    if (waitingForAI) {
+    if (moistureLevel == 0) {
+        canvas.setTextColor(rgb565(255, 100, 80));
+        canvas.drawString("thirsty... press H to spray!", 6, barY + 4);
+    } else if (waitingForAI) {
         canvas.setTextColor(Color::STATUS_DIM);
-        canvas.drawString(drawMode ? "drawing..." : "waiting...", 4, barY + 4);
+        const char* hint = drawMode ? "drawing..." : (aiThinking ? "thinking..." : "waiting...");
+        canvas.drawString(hint, 4, barY + 4);
     } else {
         // Show input with cursor — use snprintf to avoid String concatenation
         char display[128];

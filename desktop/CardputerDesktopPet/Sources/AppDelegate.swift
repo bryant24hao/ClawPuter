@@ -30,6 +30,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Track raw normX from UDP for scene mode sprite positioning
     private var lastNormX: CGFloat = 0.5
     private var lastTemperature: Float?
+    private var lastMoisture: Int?
+    private var lastHumidityPct: Int?
 
     // Desktop integration
     private var pixelArtPopover = PixelArtPopover()
@@ -105,15 +107,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // UDP listener
         udpListener = UDPListener()
-        udpListener.onStateReceived = { [weak self] (state: Int, frame: Int, mode: String, normX: Float?, normY: Float?, direction: Int?, weatherType: Int?, temperature: Float?) in
+        udpListener.onStateReceived = { [weak self] (state: Int, frame: Int, mode: String, normX: Float?, normY: Float?, direction: Int?, weatherType: Int?, temperature: Float?, moisture: Int?, humidityPct: Int?) in
             self?.behavior.applySync(state: state, frame: frame,
                                      normX: normX, normY: normY, direction: direction,
-                                     weatherType: weatherType)
+                                     weatherType: weatherType, moisture: moisture)
             if let nx = normX { self?.lastNormX = CGFloat(nx) }
             if let t = temperature { self?.lastTemperature = t }
+            if let m = moisture { self?.lastMoisture = m }
+            if let rh = humidityPct { self?.lastHumidityPct = rh }
 
             // Update connection indicator
-            self?.connectionIndicator?.title = "ESP32: Connected"
+            if let m = self?.lastMoisture, let rh = self?.lastHumidityPct {
+                self?.connectionIndicator?.title = "ESP32: Connected · 💧\(m)/4 · \(rh)%"
+            } else {
+                self?.connectionIndicator?.title = "ESP32: Connected"
+            }
         }
 
         udpListener.onPixelArtReceived = { [weak self] (size: Int, rows: [String]) in
@@ -366,18 +374,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         switch displayMode {
         case .follow:
             petWindow.setFrameOrigin(NSPoint(x: behavior.posX, y: behavior.posY))
+            petView.moisture = lastMoisture
             if needsRedraw {
                 petView.updateSprite(behavior.currentSprite(), facingLeft: behavior.facingLeft,
                                      state: behavior.state, weatherType: behavior.weatherType)
             }
-            // Continuous redraw for sleep Z animation
-            if behavior.state == .sleep {
+            // Continuous redraw for sleep Z animation or low moisture bubble animation
+            if behavior.state == .sleep || (lastMoisture ?? 4) <= 1 {
                 petView.needsDisplay = true
             }
 
         case .scene:
             sceneView.spriteNormX = behavior.syncMode ? lastNormX : 0.5
             sceneView.temperature = lastTemperature
+            sceneView.moisture = lastMoisture
+            sceneView.humidityPercent = lastHumidityPct
             if needsRedraw {
                 sceneView.updateSprite(behavior.currentSprite(), facingLeft: behavior.facingLeft,
                                        state: behavior.state, weatherType: behavior.weatherType)

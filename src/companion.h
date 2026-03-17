@@ -32,6 +32,12 @@ public:
 
     void setWeather(const WeatherData& wd) { weather = wd; }
 
+    // Moisture system
+    void spray();
+    int getMoistureLevel() const { return moistureLevel; }
+    void debugSetMoisture(int level) { moistureLevel = max(0, min(4, level)); Serial.printf("[MOISTURE] Debug set -> %d\n", moistureLevel); }
+    int getHumidityPercent() const { return weather.humidity; }
+
     // Weather simulation mode
     void toggleWeatherSim();
     void setSimWeatherType(int index); // 1-8
@@ -111,6 +117,26 @@ private:
     bool thunderFlashing = false;
 
     void initWeatherParticles();
+
+    // Moisture system
+    int moistureLevel = 2;              // 0-4, start mid-low for engagement
+    bool moistureInitialized = false;   // set initial based on first weather
+    Timer moistureDecayTimer{1200000};  // 20min default
+    Timer moistureRecoverTimer{900000}; // 15min rain auto-recover
+    unsigned long lastSprayTime = 0;
+    static constexpr unsigned long SPRAY_COOLDOWN = 3000;
+    int moveStepCount = 0;              // movement drains moisture
+    static constexpr int STEPS_PER_DRAIN = 20;  // every 20 steps = -1 moisture
+
+    struct SprayParticle { int16_t x, y; int8_t vx, vy; uint8_t life; };
+    static constexpr int MAX_SPRAY = 5;
+    SprayParticle sprayParticles[MAX_SPRAY];
+    bool sprayActive = false;
+
+    void updateMoisture();
+    void playSpraySound();
+    void drawMoistureDrops(M5Canvas& canvas, int startX, int y);
+    void drawSprayParticles(M5Canvas& canvas);
 
     // Draw a sprite with transparency (flip=true for horizontal mirror)
     void drawSprite16(M5Canvas& canvas, int x, int y, const uint16_t* data, bool flip = false);

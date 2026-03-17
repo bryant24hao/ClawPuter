@@ -135,6 +135,58 @@ void AIClient::sendMessage(const String& userMessage,
     char contentBuf[128];
     char filteredBuf[128];
 
+    // Rolling idle timeout (overflow-safe) + thinking model support
+    unsigned long lastActivity = millis();
+    unsigned long startTime = millis();
+    thinkingDetected = false;
+    bool firstContentSeen = false;
+    bool gatewayFallbackDetected = false;
+
+    // Process a single SSE content extraction — shared by chunked & non-chunked paths.
+    // Returns true if stream should stop (e.g. [DONE]).
+    auto processSSELine = [&](const char* data) -> bool {
+        lastActivity = millis();  // data received, reset idle timer
+
+        if (strcmp(data, "[DONE]") == 0) return true;
+
+        int clen = extractContent(data, contentBuf, sizeof(contentBuf));
+        if (clen > 0) {
+            // Filter thinking content: chunks starting with "think\n"
+            if (clen >= 6 && memcmp(contentBuf, "think\n", 6) == 0) {
+                thinkingDetected = true;
+                Serial.printf("[AI] Thinking detected, filtering %d chars\n", clen);
+                return false;  // skip, but keep waiting
+            }
+
+            // Detect gateway fallback injection on first real content
+            if (!firstContentSeen) {
+                firstContentSeen = true;
+                if (strstr(contentBuf, "Continue where you left off") ||
+                    strstr(contentBuf, "previous model attempt")) {
+                    gatewayFallbackDetected = true;
+                    Serial.println("[AI] Gateway fallback detected, will discard");
+                    return false;
+                }
+            }
+
+            // Normal content — display it
+            if (!gatewayFallbackDetected) {
+                int flen = filterForDisplayBuf(contentBuf, filteredBuf, sizeof(filteredBuf));
+                if (flen > 0) {
+                    fullResponse += filteredBuf;
+                    if (onToken) onToken(filteredBuf);
+                }
+            }
+        }
+        return false;
+    };
+
+    // Timeout check helper (overflow-safe subtraction)
+    auto isTimedOut = [&]() -> bool {
+        return (millis() - lastActivity > 30000) ||   // 30s idle
+               (millis() - startTime > 120000);        // 120s safety cap
+    };
+
     if (chunked) {
         // Chunked transfer decoding via byte-level state machine.
         // lineBuf carries across chunk boundaries so split data: lines reassemble.
@@ -142,7 +194,7 @@ void AIClient::sendMessage(const String& userMessage,
         long chunkRemain = 0;
         bool streamDone = false;
 
-        while (!streamDone && (client.connected() || client.available()) && millis() < deadline) {
+        while (!streamDone && (client.connected() || client.available()) && !isTimedOut()) {
             if (!client.available()) { delay(1); continue; }
             char c = client.read();
 
@@ -166,20 +218,9 @@ void AIClient::sendMessage(const String& userMessage,
                     lineBuf[lineLen] = '\0';
                     if (lineLen > 0 && lineBuf[lineLen-1] == '\r') lineBuf[--lineLen] = '\0';
 
-                    // Process SSE line
                     if (lineLen > 6 && memcmp(lineBuf, "data: ", 6) == 0) {
-                        const char* data = lineBuf + 6;
-                        if (strcmp(data, "[DONE]") == 0) {
+                        if (processSSELine(lineBuf + 6)) {
                             streamDone = true;
-                        } else {
-                            int clen = extractContent(data, contentBuf, sizeof(contentBuf));
-                            if (clen > 0) {
-                                int flen = filterForDisplayBuf(contentBuf, filteredBuf, sizeof(filteredBuf));
-                                if (flen > 0) {
-                                    fullResponse += filteredBuf;
-                                    if (onToken) onToken(filteredBuf);
-                                }
-                            }
                         }
                     }
                     lineLen = 0;
@@ -198,23 +239,14 @@ void AIClient::sendMessage(const String& userMessage,
         }
     } else {
         // Non-chunked: read byte-by-byte into lineBuf (same zero-alloc approach)
-        while ((client.connected() || client.available()) && millis() < deadline) {
+        while ((client.connected() || client.available()) && !isTimedOut()) {
             if (!client.available()) { delay(5); continue; }
             char c = client.read();
             if (c == '\n') {
                 lineBuf[lineLen] = '\0';
                 if (lineLen > 0 && lineBuf[lineLen-1] == '\r') lineBuf[--lineLen] = '\0';
                 if (lineLen > 6 && memcmp(lineBuf, "data: ", 6) == 0) {
-                    const char* data = lineBuf + 6;
-                    if (strcmp(data, "[DONE]") == 0) break;
-                    int clen = extractContent(data, contentBuf, sizeof(contentBuf));
-                    if (clen > 0) {
-                        int flen = filterForDisplayBuf(contentBuf, filteredBuf, sizeof(filteredBuf));
-                        if (flen > 0) {
-                            fullResponse += filteredBuf;
-                            if (onToken) onToken(filteredBuf);
-                        }
-                    }
+                    if (processSSELine(lineBuf + 6)) break;
                 }
                 lineLen = 0;
             } else if (lineLen < (int)sizeof(lineBuf) - 1) {
@@ -225,14 +257,29 @@ void AIClient::sendMessage(const String& userMessage,
     }
 
     client.stop();
-    Serial.printf("[AI] Done, %d chars, heap=%u, largest=%u, min_ever=%u\n",
-        fullResponse.length(), ESP.getFreeHeap(),
+    Serial.printf("[AI] Done, %d chars, thinking=%d, fallback=%d, heap=%u, largest=%u, min_ever=%u\n",
+        fullResponse.length(), thinkingDetected, gatewayFallbackDetected,
+        ESP.getFreeHeap(),
         heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
         ESP.getMinFreeHeap());
 
+    // Gateway fallback detected: discard response, report as error
+    if (gatewayFallbackDetected) {
+        fullResponse = "";
+        lastResponse = "";
+        busy = false;
+        pixelArtMode = false;
+        if (onError) onError("Model timeout, try again");
+        return;
+    }
+
     if (fullResponse.length() > 0) {
-        // Don't add pixel art responses to conversation history
-        if (!pixelArtMode) {
+        // Sanitize pixel art before adding to history:
+        // Replace raw [PIXELART:...]...[/PIXELART] with a summary so the model
+        // remembers it drew something, but won't be primed to output pixel format.
+        if (fullResponse.indexOf("[PIXELART:") >= 0) {
+            addToHistory(userMessage, "(drew a pixel art)");
+        } else if (!pixelArtMode) {
             addToHistory(userMessage, fullResponse);
         }
         lastResponse = fullResponse;
@@ -324,6 +371,20 @@ void AIClient::buildRequestDoc(const String& userMessage, JsonDocument& doc) {
         if (*subject == '\0') subject = "a cute lobster";  // default subject
         currentMsg["content"] = subject;
     } else {
-        currentMsg["content"] = userMessage;
+        // Prepend hydration context as a tag in user message (not system prompt).
+        // This nudges the model to reflect moisture state without overriding its persona.
+        const char* prefix = nullptr;
+        if (companionCtx.moisture == 0)      prefix = "[you are extremely thirsty, beg for water] ";
+        else if (companionCtx.moisture == 1) prefix = "[you are very thirsty, mention needing water] ";
+        else if (companionCtx.moisture == 2) prefix = "[you are a bit thirsty] ";
+        else if (companionCtx.moisture == 3) prefix = "[you feel good] ";
+
+        if (prefix) {
+            char combined[256];
+            snprintf(combined, sizeof(combined), "%s%s", prefix, userMessage.c_str());
+            currentMsg["content"] = combined;
+        } else {
+            currentMsg["content"] = userMessage;
+        }
     }
 }

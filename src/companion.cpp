@@ -94,14 +94,30 @@ void Companion::trySpontaneousAction() {
     if (state != CompanionState::IDLE) return;
     if (!spontaneousTimer.tick()) return;
 
-    // Random action
+    // Random action based on moisture level
     int action = random(100);
-    if (action < 30) {
-        setState(CompanionState::STRETCH);
-    } else if (action < 60) {
-        setState(CompanionState::LOOK);
+    if (moistureLevel == 4) {
+        // Hydrated: 20% happy, 20% stretch, 20% look, 40% nothing
+        if (action < 20) {
+            triggerHappy();
+        } else if (action < 40) {
+            setState(CompanionState::STRETCH);
+        } else if (action < 60) {
+            setState(CompanionState::LOOK);
+        }
+    } else if (moistureLevel >= 2) {
+        // Normal: 30% stretch, 30% look, 40% nothing
+        if (action < 30) {
+            setState(CompanionState::STRETCH);
+        } else if (action < 60) {
+            setState(CompanionState::LOOK);
+        }
+    } else {
+        // Dehydrated: 10% look only
+        if (action < 10) {
+            setState(CompanionState::LOOK);
+        }
     }
-    // 40% chance: do nothing (stay idle)
 
     // Randomize next spontaneous timer
     spontaneousTimer.setInterval(8000 + random(7000));
@@ -148,6 +164,9 @@ void Companion::update(M5Canvas& canvas) {
         setState(CompanionState::SLEEP);
     }
 
+    // Moisture system
+    updateMoisture();
+
     // Spontaneous actions
     trySpontaneousAction();
 
@@ -160,6 +179,7 @@ void Companion::update(M5Canvas& canvas) {
     // Draw everything
     drawBackground(canvas);
     drawCharacter(canvas);
+    drawSprayParticles(canvas);
     drawSleepZ(canvas);
     drawClock(canvas);
     drawSimStatusBar(canvas);
@@ -176,7 +196,14 @@ void Companion::handleKey(char key) {
     }
 
     if (key == ' ' || key == '\n') {
-        triggerHappy();
+        if (moistureLevel >= 2) {
+            triggerHappy();
+        } else if (moistureLevel == 1) {
+            setState(CompanionState::HAPPY);
+            playKeyClick();
+        } else {
+            M5Cardputer.Speaker.tone(400, 50);  // weak groan
+        }
     } else {
         playKeyClick();
     }
@@ -262,8 +289,15 @@ AccessoryType Companion::getAccessoryForWeather(WeatherType type) {
 }
 
 void Companion::move(int dx, int dy) {
-    charX += dx * MOVE_STEP;
-    charY += dy * MOVE_STEP;
+    if (moistureLevel == 0) return;  // can't move when dehydrated
+    float speedMult = 1.0f;
+    if (moistureLevel == 4) speedMult = 1.2f;
+    else if (moistureLevel == 2) speedMult = 0.8f;
+    else if (moistureLevel == 1) speedMult = 0.5f;
+    int step = max(1, (int)(MOVE_STEP * speedMult));
+
+    charX += dx * step;
+    charY += dy * step;
 
     // Clamp to bounds
     if (charX < MOVE_MIN_X) charX = MOVE_MIN_X;
@@ -274,6 +308,14 @@ void Companion::move(int dx, int dy) {
     // Update facing direction
     if (dx < 0) facingLeft = true;
     if (dx > 0) facingLeft = false;
+
+    // Movement drains moisture — every N steps, lose 1 level
+    moveStepCount++;
+    if (moveStepCount >= STEPS_PER_DRAIN && moistureLevel > 0) {
+        moveStepCount = 0;
+        moistureLevel--;
+        Serial.printf("[MOISTURE] Move drain -> %d\n", moistureLevel);
+    }
 
     // Reset idle timeout on movement
     idleTimeout.reset();
@@ -349,7 +391,7 @@ void Companion::drawBackground(M5Canvas& canvas) {
     if (weather.valid) {
         switch (weather.type) {
             case WeatherType::OVERCAST:
-                skyColor = blendRGB565(skyColor, rgb565(100, 100, 110), 160);
+                skyColor = blendRGB565(skyColor, rgb565(130, 140, 160), 80);
                 hideSun = true;
                 break;
             case WeatherType::RAIN:
@@ -631,28 +673,37 @@ void Companion::drawClock(M5Canvas& canvas) {
     canvas.setTextColor(Color::CLOCK_TEXT);
     canvas.setTextSize(2);
 
-    // Layout: center "HH:MM  0°" as a whole if weather valid
+    // Layout: center "HH:MM | 7° | 65%" as a whole if weather valid
     char tempStr[8] = {};
+    char humStr[8] = {};
     int tempW = 0;
+    int humSepW = 0; // second separator + spacing for humidity
+    int humW = 0;
     if (weather.valid) {
         int tempInt = (int)roundf(weather.temperature);
         if (tempInt < -99) tempInt = -99;
         if (tempInt > 99) tempInt = 99;
         snprintf(tempStr, sizeof(tempStr), "%d~", tempInt); // ~ as degree placeholder
         tempW = canvas.textWidth(tempStr);
+
+        if (weather.humidity > 0) {
+            snprintf(humStr, sizeof(humStr), "%d%%", weather.humidity);
+            humW = canvas.textWidth(humStr);
+            humSepW = 10 + 1 + 10; // space + separator line + space
+        }
     }
 
     int tw = canvas.textWidth(timeStr);
     int sep = weather.valid ? 10 : 0; // space before separator
     int sepW = weather.valid ? 1 : 0; // separator line width
     int sep2 = weather.valid ? 10 : 0; // space after separator
-    int totalW = tw + sep + sepW + sep2 + tempW;
+    int totalW = tw + sep + sepW + sep2 + tempW + humSepW + humW;
     int startX = (SCREEN_W - totalW) / 2;
 
     canvas.drawString(timeStr, startX, GROUND_Y + 6);
 
     if (weather.valid) {
-        // Draw separator line
+        // Draw first separator line (before temperature)
         int sepX = startX + tw + sep;
         canvas.drawFastVLine(sepX, GROUND_Y + 8, 12, Color::STATUS_DIM);
 
@@ -666,7 +717,16 @@ void Companion::drawClock(M5Canvas& canvas) {
         canvas.drawString(numStr, tempX, GROUND_Y + 6);
         // Draw small ° circle instead of font glyph
         int numW = canvas.textWidth(numStr);
+        int degreeEndX = tempX + numW + 6; // after ° symbol
         canvas.drawCircle(tempX + numW + 3, GROUND_Y + 8, 2, Color::CLOCK_TEXT);
+
+        // Draw second separator line + humidity
+        if (humStr[0]) {
+            int humSepX = degreeEndX + 10;
+            canvas.drawFastVLine(humSepX, GROUND_Y + 8, 12, Color::STATUS_DIM);
+            int humX = humSepX + 1 + 10;
+            canvas.drawString(humStr, humX, GROUND_Y + 6);
+        }
     }
 }
 
@@ -694,24 +754,50 @@ void Companion::drawSleepZ(M5Canvas& canvas) {
 
 void Companion::drawStatusText(M5Canvas& canvas) {
     const char* statusStr = "";
-    switch (state) {
-        case CompanionState::IDLE:    statusStr = "chillin'"; break;
-        case CompanionState::HAPPY:   statusStr = "yay!"; break;
-        case CompanionState::SLEEP:   statusStr = "zzz..."; break;
-        case CompanionState::TALK:    statusStr = "talking..."; break;
-        case CompanionState::STRETCH: statusStr = "*stretch*"; break;
-        case CompanionState::LOOK:    statusStr = "hmm?"; break;
+    if (moistureLevel == 0) {
+        statusStr = "so thirsty...";
+    } else if (moistureLevel == 1) {
+        statusStr = "need water...";
+    } else {
+        switch (state) {
+            case CompanionState::IDLE:    statusStr = "chillin'"; break;
+            case CompanionState::HAPPY:   statusStr = "yay!"; break;
+            case CompanionState::SLEEP:   statusStr = "zzz..."; break;
+            case CompanionState::TALK:    statusStr = "talking..."; break;
+            case CompanionState::STRETCH: statusStr = "*stretch*"; break;
+            case CompanionState::LOOK:    statusStr = "hmm?"; break;
+        }
     }
 
     canvas.setTextColor(Color::STATUS_DIM);
     canvas.setTextSize(1);
     canvas.drawString(statusStr, 4, 4);
-    canvas.drawString("[TAB] chat", SCREEN_W - 60, 4);
+
+    // Layout right side: [drops 26px] [4px gap] [~60px "[TAB] chat"]
+    // Drops: 4×5 + 3×2 = 26px wide, 7px tall
+    // Text at textSize(1) is 8px tall, drops 7px → center at y=4 (same baseline)
+    int tabX = SCREEN_W - 60;
+    int dropsX = tabX - 4 - (4 * 7);  // 4 drops × 7px pitch
+    drawMoistureDrops(canvas, dropsX, 4);
+    canvas.setTextColor(Color::STATUS_DIM);
+    canvas.setTextSize(1);
+    canvas.drawString("[TAB] chat", tabX, 4);
 }
 
 // ── Accessories ──
 
 void Companion::drawAccessory(M5Canvas& canvas, int x, int y) {
+    // Water bottle when dehydrated (overrides weather accessory)
+    if (moistureLevel <= 1) {
+        uint16_t bottleColor = rgb565(80, 160, 255);
+        uint16_t capColor = rgb565(200, 200, 220);
+        bool flip = facingLeft;
+        int bx = flip ? (x + 3) : (x + CHAR_DRAW_W - 12);
+        canvas.fillRect(bx, y + 24, 6, 8, bottleColor);
+        canvas.fillRect(bx + 1, y + 22, 4, 2, capColor);
+        return;
+    }
+
     if (!weather.valid) return;
     AccessoryType acc = getAccessoryForWeather(weather.type);
     if (acc == AccessoryType::NONE) return;
@@ -824,6 +910,177 @@ void Companion::drawNotificationOverlay(M5Canvas& canvas) {
     // Body on second line
     canvas.setTextColor(Color::CLOCK_TEXT);
     canvas.drawString(notifyBody, 4, 15);
+}
+
+// ── Moisture System ──
+
+void Companion::updateMoisture() {
+    // Set initial moisture from first weather data
+    if (!moistureInitialized && weather.valid) {
+        moistureInitialized = true;
+        // Low humidity → start thirsty, high humidity → start comfortable
+        if (weather.humidity > 70) {
+            moistureLevel = 3;
+        } else if (weather.humidity >= 40) {
+            moistureLevel = 2;
+        } else {
+            moistureLevel = 1;  // dry climate: needs water right away!
+        }
+        // Rain/snow: start at 3
+        if (weather.type == WeatherType::RAIN || weather.type == WeatherType::DRIZZLE ||
+            weather.type == WeatherType::THUNDER || weather.type == WeatherType::SNOW) {
+            moistureLevel = 3;
+        }
+        Serial.printf("[MOISTURE] Init -> %d (humidity=%d%%)\n", moistureLevel, weather.humidity);
+    }
+
+    bool pauseDecay = false;
+    bool autoRecover = false;
+
+    // Weather linkage
+    if (weather.valid) {
+        switch (weather.type) {
+            case WeatherType::RAIN:
+            case WeatherType::DRIZZLE:
+            case WeatherType::THUNDER:
+                pauseDecay = true;
+                autoRecover = true;
+                break;
+            case WeatherType::SNOW:
+                pauseDecay = true;
+                break;
+            case WeatherType::FOG:
+                // Fog: decay at 2x interval (slower decay)
+                break;
+            default:
+                break;
+        }
+    }
+
+    // Humidity-based decay interval
+    if (!pauseDecay) {
+        unsigned long decayInterval;
+        if (weather.valid && weather.humidity > 70) {
+            decayInterval = 2400000;  // 40 min
+        } else if (weather.valid && weather.humidity >= 40) {
+            decayInterval = 1200000;  // 20 min
+        } else {
+            decayInterval = 600000;   // 10 min
+        }
+        // Fog doubles the interval
+        if (weather.valid && weather.type == WeatherType::FOG) {
+            decayInterval *= 2;
+        }
+        moistureDecayTimer.setInterval(decayInterval);
+
+        if (moistureDecayTimer.tick() && moistureLevel > 0) {
+            moistureLevel--;
+            Serial.printf("[MOISTURE] Decay -> %d (humidity=%d%%)\n", moistureLevel, weather.humidity);
+        }
+    } else {
+        // Pause decay: keep resetting timer so it doesn't fire right after rain stops
+        moistureDecayTimer.reset();
+    }
+
+    // Auto-recover in rain/thunder
+    if (autoRecover && moistureLevel < 4) {
+        if (moistureRecoverTimer.tick()) {
+            moistureLevel++;
+            Serial.printf("[MOISTURE] Rain recover -> %d\n", moistureLevel);
+        }
+    } else {
+        moistureRecoverTimer.reset();
+    }
+}
+
+void Companion::spray() {
+    // Cooldown check
+    if (millis() - lastSprayTime < SPRAY_COOLDOWN) return;
+    // Already full
+    if (moistureLevel >= 4) return;
+
+    moistureLevel++;
+    lastSprayTime = millis();
+    triggerHappy();
+    playSpraySound();
+    Serial.printf("[MOISTURE] Spray -> %d\n", moistureLevel);
+
+    // Initialize spray particles
+    sprayActive = true;
+    for (int i = 0; i < MAX_SPRAY; i++) {
+        sprayParticles[i].x = charX + CHAR_DRAW_W / 2 + random(-6, 7);
+        sprayParticles[i].y = charY - 4;
+        sprayParticles[i].vx = random(-2, 3);
+        sprayParticles[i].vy = random(-3, -1);
+        sprayParticles[i].life = 25;
+    }
+}
+
+void Companion::playSpraySound() {
+    M5Cardputer.Speaker.tone(2000, 30);
+    delay(40);
+    M5Cardputer.Speaker.tone(1500, 30);
+}
+
+void Companion::drawMoistureDrops(M5Canvas& canvas, int startX, int y) {
+    uint16_t filledColor = rgb565(80, 160, 255);
+    uint16_t outlineColor = rgb565(180, 200, 220);  // subtle light outline for empty
+
+    for (int i = 0; i < 4; i++) {
+        int dx = startX + i * 7;  // 5px wide + 2px gap
+        bool filled = (i < moistureLevel);
+
+        if (filled) {
+            uint16_t color = filledColor;
+            // Flash effect: newest filled drop blinks white for 300ms after spray
+            if (i == moistureLevel - 1 && millis() - lastSprayTime < 300) {
+                if ((millis() / 50) % 2 == 0) color = Color::WHITE;
+            }
+            // Filled teardrop
+            canvas.drawPixel(dx + 2, y, color);
+            canvas.drawPixel(dx + 1, y + 1, color);
+            canvas.drawPixel(dx + 2, y + 1, color);
+            canvas.drawPixel(dx + 3, y + 1, color);
+            canvas.fillRect(dx, y + 2, 5, 4, color);
+            canvas.drawPixel(dx + 1, y + 6, color);
+            canvas.drawPixel(dx + 2, y + 6, color);
+            canvas.drawPixel(dx + 3, y + 6, color);
+        } else {
+            // Empty: outline only, no fill
+            canvas.drawPixel(dx + 2, y, outlineColor);
+            canvas.drawPixel(dx + 1, y + 1, outlineColor);
+            canvas.drawPixel(dx + 3, y + 1, outlineColor);
+            canvas.drawPixel(dx, y + 2, outlineColor);
+            canvas.drawPixel(dx + 4, y + 2, outlineColor);
+            canvas.drawPixel(dx, y + 5, outlineColor);
+            canvas.drawPixel(dx + 4, y + 5, outlineColor);
+            canvas.drawPixel(dx + 1, y + 6, outlineColor);
+            canvas.drawPixel(dx + 2, y + 6, outlineColor);
+            canvas.drawPixel(dx + 3, y + 6, outlineColor);
+        }
+    }
+}
+
+void Companion::drawSprayParticles(M5Canvas& canvas) {
+    if (!sprayActive) return;
+
+    bool anyAlive = false;
+    uint16_t sprayColor = rgb565(80, 160, 255);
+
+    for (int i = 0; i < MAX_SPRAY; i++) {
+        if (sprayParticles[i].life == 0) continue;
+        anyAlive = true;
+
+        sprayParticles[i].x += sprayParticles[i].vx;
+        sprayParticles[i].y += sprayParticles[i].vy;
+        sprayParticles[i].vy++;  // gravity
+        sprayParticles[i].life--;
+
+        // Draw 2x2 blue rect
+        canvas.fillRect(sprayParticles[i].x, sprayParticles[i].y, 2, 2, sprayColor);
+    }
+
+    if (!anyAlive) sprayActive = false;
 }
 
 // ══════════════════════════════════════════════════════════════

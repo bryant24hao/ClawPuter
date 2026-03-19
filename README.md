@@ -295,6 +295,10 @@ See [OpenClaw Research](docs/openclaw-research.md) for the full integration guid
 
 See [full roadmap](docs/roadmap.md).
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=bryant24hao/ClawPuter&type=Date)](https://star-history.com/#bryant24hao/ClawPuter&Date)
+
 ## License
 
 MIT

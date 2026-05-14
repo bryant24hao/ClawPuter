@@ -60,14 +60,17 @@ TTSPlayback ttsPlayback;
 WeatherClient weatherClient;
 CmdServer cmdServer;
 
-enum class AppMode { SETUP, COMPANION, CHAT };
+enum class AppMode { SETUP, COMPANION, CHAT, SETTINGS };
 static AppMode appMode = AppMode::SETUP;
 static bool offlineMode = false;
+static bool screenOff = false;
+static unsigned long lastInteractionMs = 0;
 
 // ── Setup mode state ──
-enum class SetupStep { SSID, PASSWORD, GATEWAY_HOST, GATEWAY_PORT, GATEWAY_TOKEN, STT_HOST, CONNECTING };
+enum class SetupStep { SSID, PASSWORD, GATEWAY_HOST, GATEWAY_PORT, GATEWAY_TOKEN, STT_HOST, WIFI_GATEWAY, WIFI_DNS1, WIFI_DNS2, CONNECTING };
 static SetupStep setupStep = SetupStep::SSID;
 static String setupInput;
+static int settingsIndex = 0;
 
 // ── NTP config ──
 static const char* NTP_SERVER = "pool.ntp.org";
@@ -79,6 +82,14 @@ void fillBuildTimeDefaults();
 void enterSetupMode();
 void updateSetupMode();
 void handleSetupKey(char key, bool enter, bool backspace, bool tab);
+void enterSettingsMode();
+void updateSettingsMode();
+void handleSettingsKey(char key, bool enter, bool backspace, bool tab);
+void applyBrightness();
+void applyVolume();
+void turnScreenOff();
+void wakeScreen();
+void updateScreenTimeout();
 bool tryConnect(const String& ssid, const String& pass);
 void connectWiFi();
 void initOnlineServices(bool usedSecondary);
@@ -89,7 +100,6 @@ void enterChatMode();
 void setup() {
     auto cfg = M5.config();
     M5Cardputer.begin(cfg, true);
-    M5Cardputer.Speaker.setVolume(255);
     Serial.begin(115200);
     delay(500);
     Serial.println("[BOOT] Starting...");
@@ -104,6 +114,9 @@ void setup() {
     Config::load();
     fillBuildTimeDefaults();
     Config::save();
+    applyBrightness();
+    applyVolume();
+    lastInteractionMs = millis();
 
     // Play boot animation
     playBootAnimation(canvas);
@@ -155,8 +168,19 @@ void loop() {
     // Handle keyboard
     bool keyPressed = M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed();
     Keyboard_Class::KeysState keys;
+    bool wokeScreen = false;
     if (keyPressed) {
         keys = M5Cardputer.Keyboard.keysState();
+        lastInteractionMs = millis();
+        if (screenOff) {
+            wakeScreen();
+            wokeScreen = true;
+        }
+    }
+
+    if (wokeScreen) {
+        delay(16);
+        return;
     }
 
     switch (appMode) {
@@ -172,6 +196,18 @@ void loop() {
             updateSetupMode();
             break;
 
+        case AppMode::SETTINGS:
+            if (keyPressed) {
+                bool enter = keys.enter;
+                bool backspace = keys.del;
+                bool tab = keys.tab;
+                char key = 0;
+                if (keys.word.size() > 0) key = keys.word[0];
+                handleSettingsKey(key, enter, backspace, tab);
+            }
+            if (appMode == AppMode::SETTINGS) updateSettingsMode();
+            break;
+
         case AppMode::COMPANION: {
             // Use keysState() for continuous movement detection (hold-to-move)
             auto ks = M5Cardputer.Keyboard.keysState();
@@ -185,6 +221,10 @@ void loop() {
                 // Fn+W = toggle weather simulation mode
                 if (ks.fn && ks.word.size() > 0 && ks.word[0] == 'w') {
                     companion.toggleWeatherSim();
+                    break;
+                }
+                if (ks.fn && ks.word.size() > 0 && ks.word[0] == 's') {
+                    enterSettingsMode();
                     break;
                 }
                 // Fn+0 = debug: set moisture to 0
@@ -320,7 +360,10 @@ void loop() {
                     chat.handleBackspace();
                 } else if (charDown) {
                     char key = ks.word[0];
-                    if (ks.fn && key == ';') {
+                    if (ks.fn && key == 's') {
+                        enterSettingsMode();
+                        break;
+                    } else if (ks.fn && key == ';') {
                         chat.scrollUp();
                     } else if (ks.fn && key == '/') {
                         chat.scrollDown();
@@ -475,7 +518,147 @@ void loop() {
                            companion.getMoistureLevel(), companion.getHumidityPercent());
     }
 
+    updateScreenTimeout();
     delay(16); // ~60fps cap
+}
+
+static int clampInt(int value, int minValue, int maxValue) {
+    if (value < minValue) return minValue;
+    if (value > maxValue) return maxValue;
+    return value;
+}
+
+void applyBrightness() {
+    if (!screenOff) M5Cardputer.Display.setBrightness(Config::getBrightness());
+}
+
+void applyVolume() {
+    M5Cardputer.Speaker.setVolume((uint8_t)((uint16_t)Config::getVolume() * 255 / 100));
+}
+
+void turnScreenOff() {
+    screenOff = true;
+    M5Cardputer.Display.setBrightness(0);
+}
+
+void wakeScreen() {
+    screenOff = false;
+    applyBrightness();
+    lastInteractionMs = millis();
+}
+
+void updateScreenTimeout() {
+    uint16_t timeout = Config::getScreenOffTimeoutSec();
+    if (!screenOff && timeout > 0 && millis() - lastInteractionMs > (unsigned long)timeout * 1000UL) {
+        turnScreenOff();
+    }
+}
+
+void enterSettingsMode() {
+    appMode = AppMode::SETTINGS;
+    settingsIndex = 0;
+}
+
+static const char* screenTimeoutLabel(uint16_t seconds) {
+    switch (seconds) {
+        case 0: return "Off";
+        case 30: return "30s";
+        case 60: return "1m";
+        case 120: return "2m";
+        case 300: return "5m";
+        default: return "Custom";
+    }
+}
+
+static uint16_t nextTimeout(uint16_t current, int direction) {
+    static const uint16_t values[] = {0, 30, 60, 120, 300};
+    int idx = 0;
+    for (int i = 0; i < 5; i++) {
+        if (values[i] == current) {
+            idx = i;
+            break;
+        }
+    }
+    idx = clampInt(idx + direction, 0, 4);
+    return values[idx];
+}
+
+void updateSettingsMode() {
+    canvas.fillScreen(Color::BG_DAY);
+    canvas.setTextColor(Color::CLOCK_TEXT);
+    canvas.setTextSize(1);
+    canvas.drawString("=== Settings ===", 62, 4);
+
+    char line[48];
+    const char* marker;
+
+    marker = settingsIndex == 0 ? ">" : " ";
+    snprintf(line, sizeof(line), "%s Brightness: %u", marker, Config::getBrightness());
+    canvas.drawString(line, 20, 25);
+
+    marker = settingsIndex == 1 ? ">" : " ";
+    snprintf(line, sizeof(line), "%s Volume: %u", marker, Config::getVolume());
+    canvas.drawString(line, 20, 42);
+
+    marker = settingsIndex == 2 ? ">" : " ";
+    snprintf(line, sizeof(line), "%s Screen timeout: %s", marker, screenTimeoutLabel(Config::getScreenOffTimeoutSec()));
+    canvas.drawString(line, 20, 59);
+
+    marker = settingsIndex == 3 ? ">" : " ";
+    snprintf(line, sizeof(line), "%s Screen off now", marker);
+    canvas.drawString(line, 20, 76);
+
+    canvas.setTextColor(Color::STATUS_DIM);
+    canvas.drawString(";/.: select  , or /: adjust", 10, 104);
+    canvas.drawString("Enter: save/off  Tab: back", 10, 119);
+    canvas.pushSprite(0, 0);
+}
+
+void handleSettingsKey(char key, bool enter, bool backspace, bool tab) {
+    if (tab || backspace) {
+        Config::save();
+        enterCompanionMode();
+        return;
+    }
+
+    if (key == ';') {
+        settingsIndex = clampInt(settingsIndex - 1, 0, 3);
+        return;
+    }
+    if (key == '.') {
+        settingsIndex = clampInt(settingsIndex + 1, 0, 3);
+        return;
+    }
+
+    int direction = 0;
+    if (key == '/') direction = 1;
+    else if (key == ',') direction = -1;
+
+    if (direction != 0) {
+        if (settingsIndex == 0) {
+            int value = clampInt((int)Config::getBrightness() + direction * 10, 10, 255);
+            Config::setBrightness((uint8_t)value);
+            applyBrightness();
+        } else if (settingsIndex == 1) {
+            int value = clampInt((int)Config::getVolume() + direction * 5, 0, 100);
+            Config::setVolume((uint8_t)value);
+            applyVolume();
+        } else if (settingsIndex == 2) {
+            Config::setScreenOffTimeoutSec(nextTimeout(Config::getScreenOffTimeoutSec(), direction));
+        }
+        Config::save();
+        return;
+    }
+
+    if (enter) {
+        Config::save();
+        if (settingsIndex == 3) {
+            enterCompanionMode();
+            turnScreenOff();
+        } else {
+            enterCompanionMode();
+        }
+    }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -595,6 +778,42 @@ void updateSetupMode() {
             canvas.drawString("[Tab] cancel", 170, 62);
             break;
 
+        case SetupStep::WIFI_GATEWAY:
+            canvas.drawString("WiFi Gateway:", 10, 25);
+            getDefaultHint(hint, sizeof(hint), Config::getWifiGateway(), false);
+            canvas.setTextColor(Color::STATUS_DIM);
+            canvas.drawString(hint, 105, 25);
+            canvas.setTextColor(Color::WHITE);
+            canvas.drawString((setupInput + "_").c_str(), 10, 42);
+            canvas.setTextColor(Color::STATUS_DIM);
+            canvas.drawString("Empty keep, '-' clear", 10, 62);
+            canvas.drawString("[Tab] cancel", 170, 62);
+            break;
+
+        case SetupStep::WIFI_DNS1:
+            canvas.drawString("WiFi DNS 1:", 10, 25);
+            getDefaultHint(hint, sizeof(hint), Config::getWifiDns1(), false);
+            canvas.setTextColor(Color::STATUS_DIM);
+            canvas.drawString(hint, 95, 25);
+            canvas.setTextColor(Color::WHITE);
+            canvas.drawString((setupInput + "_").c_str(), 10, 42);
+            canvas.setTextColor(Color::STATUS_DIM);
+            canvas.drawString("Empty keep, '-' clear", 10, 62);
+            canvas.drawString("[Tab] cancel", 170, 62);
+            break;
+
+        case SetupStep::WIFI_DNS2:
+            canvas.drawString("WiFi DNS 2:", 10, 25);
+            getDefaultHint(hint, sizeof(hint), Config::getWifiDns2(), false);
+            canvas.setTextColor(Color::STATUS_DIM);
+            canvas.drawString(hint, 95, 25);
+            canvas.setTextColor(Color::WHITE);
+            canvas.drawString((setupInput + "_").c_str(), 10, 42);
+            canvas.setTextColor(Color::STATUS_DIM);
+            canvas.drawString("Empty keep, '-' clear", 10, 62);
+            canvas.drawString("[Tab] cancel", 170, 62);
+            break;
+
         case SetupStep::CONNECTING:
             canvas.drawString("Connecting to WiFi...", 50, 55);
             {
@@ -677,6 +896,36 @@ void handleSetupKey(char key, bool enter, bool backspace, bool tab) {
             if (setupInput.length() > 0) {
                 Config::setSttHost(setupInput);
             }
+            setupInput = "";
+            setupStep = SetupStep::WIFI_GATEWAY;
+            break;
+
+        case SetupStep::WIFI_GATEWAY:
+            if (setupInput == "-") {
+                Config::setWifiGateway("");
+            } else if (setupInput.length() > 0) {
+                Config::setWifiGateway(setupInput);
+            }
+            setupInput = "";
+            setupStep = SetupStep::WIFI_DNS1;
+            break;
+
+        case SetupStep::WIFI_DNS1:
+            if (setupInput == "-") {
+                Config::setWifiDns1("");
+            } else if (setupInput.length() > 0) {
+                Config::setWifiDns1(setupInput);
+            }
+            setupInput = "";
+            setupStep = SetupStep::WIFI_DNS2;
+            break;
+
+        case SetupStep::WIFI_DNS2:
+            if (setupInput == "-") {
+                Config::setWifiDns2("");
+            } else if (setupInput.length() > 0) {
+                Config::setWifiDns2(setupInput);
+            }
             Config::save();
             setupInput = "";
             setupStep = SetupStep::CONNECTING;
@@ -692,12 +941,45 @@ void handleSetupKey(char key, bool enter, bool backspace, bool tab) {
 // WiFi connection — dual WiFi + failure handling
 // ══════════════════════════════════════════════════════════════
 
+static bool parseIpAddress(const String& value, IPAddress& out) {
+    if (value.length() == 0) return false;
+    if (!out.fromString(value)) {
+        Serial.printf("[WIFI] Invalid IP setting: %s\n", value.c_str());
+        return false;
+    }
+    return true;
+}
+
+static void applyWiFiIpConfig() {
+    IPAddress gateway;
+    IPAddress dns1;
+    IPAddress dns2;
+    bool hasGateway = parseIpAddress(Config::getWifiGateway(), gateway);
+    bool hasDns1 = parseIpAddress(Config::getWifiDns1(), dns1);
+    bool hasDns2 = parseIpAddress(Config::getWifiDns2(), dns2);
+    if (!hasGateway && !hasDns1 && !hasDns2) return;
+
+    IPAddress unset;
+    IPAddress subnet = hasGateway ? IPAddress(255, 255, 255, 0) : unset;
+    if (!hasGateway) gateway = unset;
+    if (!hasDns1) dns1 = unset;
+    if (!hasDns2) dns2 = unset;
+
+    bool ok = WiFi.config(unset, gateway, subnet, dns1, dns2);
+    Serial.printf("[WIFI] Static net config: gw=%s dns1=%s dns2=%s -> %s\n",
+                  Config::getWifiGateway().length() ? Config::getWifiGateway().c_str() : "dhcp",
+                  Config::getWifiDns1().length() ? Config::getWifiDns1().c_str() : "dhcp",
+                  Config::getWifiDns2().length() ? Config::getWifiDns2().c_str() : "dhcp",
+                  ok ? "OK" : "FAILED");
+}
+
 // Try connecting to a single WiFi network. Returns true on success.
 bool tryConnect(const String& ssid, const String& pass) {
     Serial.printf("[WIFI] Trying %s...\n", ssid.c_str());
 
     WiFi.disconnect(true);
     delay(100);
+    applyWiFiIpConfig();
     WiFi.begin(ssid.c_str(), pass.c_str());
 
     int attempts = 0;

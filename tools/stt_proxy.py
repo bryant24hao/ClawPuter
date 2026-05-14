@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Lightweight HTTP proxy for Groq Whisper STT and Edge TTS.
-ESP32 connects here over HTTP; STT is forwarded to Groq over HTTPS,
+Lightweight HTTP proxy for Whisper STT and Edge TTS.
+ESP32 connects here over HTTP; STT can run locally with faster-whisper or forward to Groq,
 TTS uses edge-tts locally and returns raw PCM audio.
 
 Usage:
     python3 tools/stt_proxy.py
 
-Requires GROQ_API_KEY environment variable (reads from .env if present).
+Set STT_BACKEND=local for local faster-whisper, or STT_BACKEND=groq for Groq.
 Listens on port 8090 by default (change with STT_PROXY_PORT env var).
 """
 
@@ -32,10 +32,55 @@ if os.path.exists(env_file):
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 PORT = int(os.environ.get("STT_PROXY_PORT", "8090"))
 SOCKS_PROXY = os.environ.get("STT_SOCKS_PROXY", "")
+STT_BACKEND = os.environ.get("STT_BACKEND", "groq").lower()
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "base")
+WHISPER_DEVICE = os.environ.get("WHISPER_DEVICE", "cpu")
+WHISPER_COMPUTE_TYPE = os.environ.get("WHISPER_COMPUTE_TYPE", "int8")
+WHISPER_LANGUAGE = os.environ.get("WHISPER_LANGUAGE", "") or None
+_whisper_model = None
 
-if not GROQ_API_KEY:
+if STT_BACKEND not in ("groq", "local", "whisper", "faster-whisper"):
+    print(f"ERROR: unsupported STT_BACKEND={STT_BACKEND}")
+    sys.exit(1)
+
+if STT_BACKEND == "groq" and not GROQ_API_KEY:
     print("ERROR: GROQ_API_KEY not set. Export it or add to .env")
     sys.exit(1)
+
+
+def extract_wav(body):
+    start = body.find(b"RIFF")
+    if start < 0 or start + 12 > len(body) or body[start + 8:start + 12] != b"WAVE":
+        raise ValueError("WAV payload not found in multipart body")
+    total_size = int.from_bytes(body[start + 4:start + 8], "little") + 8
+    end = start + total_size
+    if end > len(body):
+        raise ValueError("Incomplete WAV payload")
+    return body[start:end]
+
+
+def transcribe_local(body):
+    global _whisper_model
+
+    if _whisper_model is None:
+        try:
+            from faster_whisper import WhisperModel
+        except ImportError as e:
+            raise RuntimeError("Install local STT dependency: pip install faster-whisper") from e
+        print(f"  [STT] Loading faster-whisper model={WHISPER_MODEL} device={WHISPER_DEVICE} compute={WHISPER_COMPUTE_TYPE}")
+        _whisper_model = WhisperModel(WHISPER_MODEL, device=WHISPER_DEVICE, compute_type=WHISPER_COMPUTE_TYPE)
+
+    wav_data = extract_wav(body)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+        tmp.write(wav_data)
+        tmp_path = tmp.name
+
+    try:
+        segments, _ = _whisper_model.transcribe(tmp_path, language=WHISPER_LANGUAGE, vad_filter=True)
+        text = "".join(segment.text for segment in segments).strip()
+        return json.dumps({"text": text}, ensure_ascii=False).encode() + b"\n"
+    finally:
+        os.unlink(tmp_path)
 
 
 class ProxyHandler(BaseHTTPRequestHandler):
@@ -153,13 +198,30 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
         print(f"  Received {content_length} bytes from ESP32")
 
-        # Write body to temp file for curl (avoids pipe size limits)
+        if STT_BACKEND in ("local", "whisper", "faster-whisper"):
+            try:
+                resp_body = transcribe_local(body)
+                print(f"  Local Whisper response: {resp_body[:200].decode(errors='replace')}")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(resp_body)))
+                self.end_headers()
+                self.wfile.write(resp_body)
+            except Exception as e:
+                msg = json.dumps({"error": {"message": str(e)}}).encode()
+                self.send_response(502)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(msg)
+                print(f"  Local Whisper error: {e}")
+            return
+
+        tmp_path = None
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".bin") as tmp:
                 tmp.write(body)
                 tmp_path = tmp.name
 
-            # Forward to Groq via curl (optionally through SOCKS proxy)
             cmd = ["curl", "-s"]
             if SOCKS_PROXY:
                 cmd += ["--proxy", SOCKS_PROXY]
@@ -172,21 +234,16 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 "--data-binary", f"@{tmp_path}",
                 "-w", "\n%{http_code}",
             ]
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                timeout=35,
-            )
+            result = subprocess.run(cmd, capture_output=True, timeout=35)
 
             os.unlink(tmp_path)
+            tmp_path = None
 
             output = result.stdout
-            # Last line is the HTTP status code
             lines = output.rsplit(b"\n", 1)
             resp_body = lines[0] if len(lines) > 1 else output
             status = int(lines[-1]) if len(lines) > 1 and lines[-1].strip().isdigit() else 502
 
-            # Ensure body ends with \n so ESP32's line-based reader can process it
             if resp_body and not resp_body.endswith(b"\n"):
                 resp_body += b"\n"
 
@@ -198,11 +255,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(resp_body)
         except Exception as e:
-            try:
-                os.unlink(tmp_path)
-            except Exception:
-                pass
-            msg = f'{{"error":{{"message":"{e}"}}}}'.encode()
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+            msg = json.dumps({"error": {"message": str(e)}}).encode()
             self.send_response(502)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -216,8 +274,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     server = HTTPServer(("0.0.0.0", PORT), ProxyHandler)
     print(f"STT/TTS Proxy listening on 0.0.0.0:{PORT}")
-    print(f"Groq key: {'set' if GROQ_API_KEY else 'NOT SET'} ({len(GROQ_API_KEY)} chars)")
-    print(f"  STT: POST /v1/audio/transcriptions → Groq")
+    print(f"STT backend: {STT_BACKEND}")
+    if STT_BACKEND == "groq":
+        print(f"Groq key: {'set' if GROQ_API_KEY else 'NOT SET'} ({len(GROQ_API_KEY)} chars)")
+        print(f"  STT: POST /v1/audio/transcriptions → Groq")
+    else:
+        print(f"  STT: POST /v1/audio/transcriptions → faster-whisper {WHISPER_MODEL}")
     print(f"  TTS: POST /v1/audio/speech → edge-tts + ffmpeg")
     try:
         server.serve_forever()

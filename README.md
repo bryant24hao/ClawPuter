@@ -254,6 +254,62 @@ This project connects to an OpenClaw Gateway running on your Mac or VPS. To set 
 
 See [OpenClaw Research](docs/openclaw-research.md) for the full integration guide.
 
+## Linux Setup (Podman + OpenClaw)
+
+If your OpenClaw Gateway runs inside a Podman container with `--network=pasta`, the container's ports are not automatically exposed to your LAN. The Cardputer won't be able to reach the gateway directly. You need a port forward:
+
+### Port Forwarding (one-time setup)
+
+```bash
+# Get the container's PID
+CTR_PID=$(podman inspect ubuntu-shell --format '{{.State.Pid}}')
+
+# Forward LAN port 18789 into the container's network namespace
+sudo socat TCP-LISTEN:18789,bind=<your-lan-ip>,reuseaddr,fork \
+  EXEC:"sudo nsenter -t $CTR_PID -n -- socat STDIO TCP:localhost:18789" &
+```
+
+Set `OPENCLAW_HOST` to your host's LAN IP (e.g. `192.168.1.125`) in `.env`.
+
+### USB Permissions (Linux udev rule)
+
+```bash
+sudo tee /etc/udev/rules.d/99-cardputer.rules << 'EOF'
+# M5Stack Cardputer ESP32-S3
+SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", MODE="0666"
+EOF
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+### PSRAM Note
+
+Some Cardputer variants have **embedded flash only** (no external PSRAM). The `BOARD_HAS_PSRAM` flag in `platformio.ini` is safe — PSRAM initialization fails gracefully, and the firmware's voice/TTS buffer allocator falls back to internal RAM. If you see `PSRAM ID read error` in serial output, this is expected and harmless.
+
+### Starting Services
+
+```bash
+# 1. Start port forward (required for chat)
+CTR_PID=$(podman inspect ubuntu-shell --format '{{.State.Pid}}')
+sudo socat TCP-LISTEN:18789,bind=<your-lan-ip>,reuseaddr,fork \
+  EXEC:"sudo nsenter -t $CTR_PID -n -- socat STDIO TCP:localhost:18789" &
+
+# 2. Start STT proxy (required for voice)
+source .env && python3 tools/stt_proxy.py &
+
+# 3. Flash firmware
+source .env && sudo chmod 666 /dev/ttyACM0 && pio run -t upload
+```
+
+### Getting the Gateway Token
+
+```bash
+podman exec ubuntu-shell python3 -c "
+import json
+with open('/root/.openclaw/openclaw.json') as f:
+    print(json.load(f)['gateway']['auth']['token'])
+"
+```
+
 ## Documentation
 
 - [Setup & Flash Guide](docs/setup-and-flash.md)

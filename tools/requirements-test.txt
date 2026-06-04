@@ -1,0 +1,6 @@
+# Dependencies for Python tests.
+#
+# Install:
+#   pip install -r tools/requirements-test.txt
+
+pytest>=8.0.0

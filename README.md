@@ -73,6 +73,10 @@ pio run -t upload
 
 First-time flashing may require download mode: hold **G0** + press **Reset**, then release G0. See [Setup Guide](docs/setup-and-flash.md) for details.
 
+### Compile-Time Options
+
+- `CLAWPUTER_DISABLE_WIFI_SLEEP` defaults to `1`, so the firmware calls `WiFi.setSleep(false)` before connecting. This avoids WiFi-related display/backlight instability on some ESP32-S3/Cardputer setups. Set `-DCLAWPUTER_DISABLE_WIFI_SLEEP=0` in PlatformIO `build_flags` if you prefer the default WiFi power-save behavior.
+
 ### 3. Start STT Proxy (for voice input)
 
 ```bash
@@ -190,7 +194,7 @@ This builds the Swift app, wraps it in a `.app` bundle with `Info.plist` (requir
 
 - **Dual WiFi**: Primary WiFi fails → automatically tries secondary (e.g. phone hotspot). Gateway host switches automatically.
 - **Offline mode**: If all WiFi fails, press Tab to enter offline companion mode (animations, clock, sound effects all work).
-- **Runtime config**: Fn+R opens a setup wizard to change WiFi SSID/password, Gateway host/port/token, STT host, and optional static IP/gateway/subnet/DNS settings — no re-flashing needed. Press Tab in setup to cancel and return to companion mode.
+- **Runtime config**: Fn+R opens a setup wizard to change WiFi SSID/password, Gateway host/port/token, STT host, and optional static IP/gateway/subnet/DNS settings — no re-flashing needed. Empty static network fields stay on DHCP, and the setup wizard shows the current DHCP IP/gateway/subnet/DNS values when connected. Press Tab in setup to cancel and return to companion mode.
 - **Device settings**: Fn+S opens brightness, volume, screen timeout, and screen-off controls. These settings are saved on device.
 - **WiFi failure menu**: Retry / Setup wizard (Fn+R) / Offline mode (Tab) — no more stuck on "Connecting...".
 

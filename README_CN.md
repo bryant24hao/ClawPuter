@@ -71,6 +71,10 @@ pio run -t upload
 
 首次烧录需要手动进入下载模式：按住 **G0** + 按 **Reset**，然后松开 G0。详见[烧录指南](docs/setup-and-flash.md)。
 
+### 编译时选项
+
+- `CLAWPUTER_DISABLE_WIFI_SLEEP` 默认是 `1`，固件会在连接 WiFi 前调用 `WiFi.setSleep(false)`。这可以规避部分 ESP32-S3/Cardputer 环境下 WiFi 省电导致的屏幕/背光闪烁。若希望保留默认 WiFi 省电行为，可在 PlatformIO `build_flags` 中设置 `-DCLAWPUTER_DISABLE_WIFI_SLEEP=0`。
+
 ### 3. 启动 STT 代理（语音输入）
 
 ```bash
@@ -172,7 +176,7 @@ cd desktop/CardputerDesktopPet && ./run.sh
 
 - **双 WiFi**：主 WiFi 连不上 → 自动尝试备用 WiFi（如手机热点），Gateway IP 自动切换。
 - **离线模式**：所有 WiFi 失败后，按 Tab 进入离线伴侣模式（动画、时钟、音效照常工作）。
-- **运行时配置**：Fn+R 打开 Setup 向导，可修改 WiFi SSID/密码、Gateway 地址/端口/Token、STT Host，以及可选静态 IP/Gateway/子网/DNS 设置，无需重新烧录。
+- **运行时配置**：Fn+R 打开 Setup 向导，可修改 WiFi SSID/密码、Gateway 地址/端口/Token、STT Host，以及可选静态 IP/Gateway/子网/DNS 设置，无需重新烧录。静态网络字段留空时继续使用 DHCP；设备已联网时，Setup 会显示当前 DHCP 获取到的 IP/Gateway/子网/DNS。
 - **设备设置**：Fn+S 打开亮度、音量、息屏超时和立即息屏控制，这些设置会保存在设备上。
 - **WiFi 失败菜单**：连接失败后提供三个选项——重试 / Setup 向导 / 离线模式。
 

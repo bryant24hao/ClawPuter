@@ -49,6 +49,9 @@
 #ifndef DEFAULT_CITY
 #define DEFAULT_CITY "Beijing"
 #endif
+#ifndef CLAWPUTER_DISABLE_WIFI_SLEEP
+#define CLAWPUTER_DISABLE_WIFI_SLEEP 1
+#endif
 
 // ── Globals ──
 M5Canvas canvas(&M5Cardputer.Display);
@@ -234,7 +237,6 @@ void loop() {
                 }
                 // Fn+R = reset config
                 if (ks.fn && ks.word.size() > 0 && ks.word[0] == 'r') {
-                    WiFi.disconnect(true);
                     Config::reset();
                     fillBuildTimeDefaults();
                     Config::save();
@@ -682,6 +684,20 @@ static void getDefaultHint(char* buf, int bufSize, const String& value, bool isP
     }
 }
 
+static void getNetworkHint(char* buf, int bufSize, const String& savedValue, IPAddress dhcpValue) {
+    if (savedValue.length() > 0) {
+        snprintf(buf, bufSize, "[static %s]", savedValue.c_str());
+        return;
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+        snprintf(buf, bufSize, "[dhcp %s]", dhcpValue.toString().c_str());
+        return;
+    }
+
+    snprintf(buf, bufSize, "(dhcp)");
+}
+
 void updateSetupMode() {
     canvas.fillScreen(Color::BG_DAY);
     canvas.setTextColor(Color::CLOCK_TEXT);
@@ -780,7 +796,7 @@ void updateSetupMode() {
 
         case SetupStep::WIFI_IP:
             canvas.drawString("WiFi IP:", 10, 25);
-            getDefaultHint(hint, sizeof(hint), Config::getWifiLocalIp(), false);
+            getNetworkHint(hint, sizeof(hint), Config::getWifiLocalIp(), WiFi.localIP());
             canvas.setTextColor(Color::STATUS_DIM);
             canvas.drawString(hint, 70, 25);
             canvas.setTextColor(Color::WHITE);
@@ -792,7 +808,7 @@ void updateSetupMode() {
 
         case SetupStep::WIFI_GATEWAY:
             canvas.drawString("WiFi Gateway:", 10, 25);
-            getDefaultHint(hint, sizeof(hint), Config::getWifiGateway(), false);
+            getNetworkHint(hint, sizeof(hint), Config::getWifiGateway(), WiFi.gatewayIP());
             canvas.setTextColor(Color::STATUS_DIM);
             canvas.drawString(hint, 105, 25);
             canvas.setTextColor(Color::WHITE);
@@ -804,7 +820,7 @@ void updateSetupMode() {
 
         case SetupStep::WIFI_SUBNET:
             canvas.drawString("WiFi Subnet:", 10, 25);
-            getDefaultHint(hint, sizeof(hint), Config::getWifiSubnet(), false);
+            getNetworkHint(hint, sizeof(hint), Config::getWifiSubnet(), WiFi.subnetMask());
             canvas.setTextColor(Color::STATUS_DIM);
             canvas.drawString(hint, 100, 25);
             canvas.setTextColor(Color::WHITE);
@@ -816,7 +832,7 @@ void updateSetupMode() {
 
         case SetupStep::WIFI_DNS1:
             canvas.drawString("WiFi DNS 1:", 10, 25);
-            getDefaultHint(hint, sizeof(hint), Config::getWifiDns1(), false);
+            getNetworkHint(hint, sizeof(hint), Config::getWifiDns1(), WiFi.dnsIP(0));
             canvas.setTextColor(Color::STATUS_DIM);
             canvas.drawString(hint, 95, 25);
             canvas.setTextColor(Color::WHITE);
@@ -828,7 +844,7 @@ void updateSetupMode() {
 
         case SetupStep::WIFI_DNS2:
             canvas.drawString("WiFi DNS 2:", 10, 25);
-            getDefaultHint(hint, sizeof(hint), Config::getWifiDns2(), false);
+            getNetworkHint(hint, sizeof(hint), Config::getWifiDns2(), WiFi.dnsIP(1));
             canvas.setTextColor(Color::STATUS_DIM);
             canvas.drawString(hint, 95, 25);
             canvas.setTextColor(Color::WHITE);
@@ -1043,6 +1059,9 @@ bool tryConnect(const String& ssid, const String& pass, bool useSavedIpConfig) {
 
     WiFi.disconnect(true);
     delay(100);
+#if CLAWPUTER_DISABLE_WIFI_SLEEP
+    WiFi.setSleep(false);
+#endif
     if (useSavedIpConfig) {
         applyWiFiIpConfig();
     } else {

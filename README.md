@@ -57,7 +57,7 @@ export STT_PROXY_HOST="<your-host-ip>"       # Machine running stt_proxy.py
 export STT_PROXY_PORT="8090"                 # STT proxy port (default 8090)
 
 # Weather (optional)
-export DEFAULT_CITY="Beijing"                # City name for weather lookup
+export DEFAULT_CITY="Beijing"                # City name for weather lookup and display timezone
 
 # Secondary WiFi (optional, for phone hotspot fallback)
 export WIFI_SSID2="<your-hotspot-ssid>"
@@ -149,6 +149,7 @@ A virtual hydration mechanic tied to real-world weather:
 ### Weather — Real-Time & Simulated
 
 - **Auto-updates** every 15 minutes from Open-Meteo (free, no API key needed). City configured via `DEFAULT_CITY` env var.
+- **City timezone**: `DEFAULT_CITY` also determines the displayed local timezone after weather data is fetched. The clock falls back to UTC+8 until the city timezone is resolved.
 - **Background effects**: rain drops fall, snow drifts with horizontal drift, fog dots shimmer, thunder flashes the screen white. Sky tints darker under heavy weather. Sun/moon/stars hidden during overcast conditions.
 - **Accessories**: the pet automatically wears sunglasses (clear/cloudy), umbrella (rain/drizzle/thunder), snow hat (snow), or mask (fog/overcast). Accessories flip with the sprite direction.
 - **Temperature** shown next to the clock with a ° symbol, separated by a vertical divider.

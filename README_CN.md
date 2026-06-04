@@ -55,7 +55,7 @@ export STT_PROXY_HOST="<your-host-ip>"       # 运行 stt_proxy.py 的机器 IP
 export STT_PROXY_PORT="8090"                 # STT 代理端口（默认 8090）
 
 # 天气（可选）
-export DEFAULT_CITY="Beijing"                # 天气查询城市
+export DEFAULT_CITY="Beijing"                # 天气查询城市和显示时区
 
 # 备用 WiFi（可选，手机热点降级）
 export WIFI_SSID2="<your-hotspot-ssid>"
@@ -132,6 +132,7 @@ pio device monitor
 ### 天气系统
 
 - **自动刷新**：每 15 分钟从 Open-Meteo 获取天气数据（免费，不需要 API Key），根据 `DEFAULT_CITY` 配置自动定位。
+- **城市时区**：`DEFAULT_CITY` 现在也决定设备显示的本地时区。天气数据返回城市时区后，底部时钟会切换到该城市本地时间；解析前仍使用 UTC+8 作为兜底。
 - **背景特效**：雨滴下落、雪花飘飞（带横向漂移）、雾气点阵闪烁、雷暴白色闪光。天空色调随天气变暗。
 - **宠物配饰**：晴天/多云戴墨镜 🕶️、雨天/雷暴撑雨伞 ☂️、下雪戴红色雪帽 🎅、雾天/阴天戴口罩 😷。配饰随精灵左右翻转。
 - **温度显示**：时钟旁显示当前温度（°），用竖线分隔。

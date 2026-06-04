@@ -1,6 +1,7 @@
 #include <M5Cardputer.h>
 #include <WiFi.h>
 #include <time.h>
+#include <stdlib.h>
 #include "utils.h"
 #include "config.h"
 #include "companion.h"
@@ -77,8 +78,10 @@ static int settingsIndex = 0;
 
 // ── NTP config ──
 static const char* NTP_SERVER = "pool.ntp.org";
-static const long  GMT_OFFSET_SEC = 8 * 3600;  // UTC+8 for China
+static const long  GMT_OFFSET_SEC = 8 * 3600;  // Fallback until weather city timezone is resolved
 static const int   DAYLIGHT_OFFSET_SEC = 0;
+static long appliedGmtOffsetSec = GMT_OFFSET_SEC;
+static bool weatherTimeZoneApplied = false;
 
 // ── Forward declarations ──
 void fillBuildTimeDefaults();
@@ -93,6 +96,9 @@ void applyVolume();
 void turnScreenOff();
 void wakeScreen();
 void updateScreenTimeout();
+static void formatFixedTimeZone(long utcOffsetSeconds, char* buf, size_t bufSize);
+static void applyTimeZoneOffset(long utcOffsetSeconds, bool syncNtp);
+static void applyWeatherTimeZone(const WeatherData& data);
 bool tryConnect(const String& ssid, const String& pass, bool useSavedIpConfig = true);
 void connectWiFi();
 void initOnlineServices(bool usedSecondary);
@@ -278,7 +284,10 @@ void loop() {
                 }
             }
 
-            if (!offlineMode) weatherClient.update();
+            if (!offlineMode) {
+                weatherClient.update();
+                applyWeatherTimeZone(weatherClient.getData());
+            }
             if (!companion.isWeatherSimMode()) {
                 companion.setWeather(weatherClient.getData());
             }
@@ -554,6 +563,45 @@ void updateScreenTimeout() {
     if (!screenOff && timeout > 0 && millis() - lastInteractionMs > (unsigned long)timeout * 1000UL) {
         turnScreenOff();
     }
+}
+
+static void formatFixedTimeZone(long utcOffsetSeconds, char* buf, size_t bufSize) {
+    long posixOffset = -utcOffsetSeconds; // POSIX TZ offset is local -> UTC.
+    if (posixOffset == 0) {
+        snprintf(buf, bufSize, "UTC0");
+        return;
+    }
+
+    char sign = posixOffset > 0 ? '+' : '-';
+    unsigned long absOffset = (unsigned long)(posixOffset > 0 ? posixOffset : -posixOffset);
+    unsigned long hours = absOffset / 3600UL;
+    unsigned long minutes = (absOffset % 3600UL) / 60UL;
+    if (minutes > 0) {
+        snprintf(buf, bufSize, "UTC%c%lu:%02lu", sign, hours, minutes);
+    } else {
+        snprintf(buf, bufSize, "UTC%c%lu", sign, hours);
+    }
+}
+
+static void applyTimeZoneOffset(long utcOffsetSeconds, bool syncNtp) {
+    char tz[20];
+    formatFixedTimeZone(utcOffsetSeconds, tz, sizeof(tz));
+    if (syncNtp) {
+        configTzTime(tz, NTP_SERVER);
+    } else {
+        setenv("TZ", tz, 1);
+        tzset();
+    }
+}
+
+static void applyWeatherTimeZone(const WeatherData& data) {
+    if (!data.timezoneValid) return;
+    if (weatherTimeZoneApplied && appliedGmtOffsetSec == data.utcOffsetSeconds) return;
+
+    appliedGmtOffsetSec = data.utcOffsetSeconds;
+    weatherTimeZoneApplied = true;
+    applyTimeZoneOffset(appliedGmtOffsetSec, false);
+    Serial.printf("[TIME] Applied city timezone offset: %ld seconds\n", appliedGmtOffsetSec);
 }
 
 void enterSettingsMode() {
@@ -1165,8 +1213,10 @@ void connectWiFi() {
 
 // Initialize NTP, state broadcast, AI client, and voice input
 void initOnlineServices(bool usedSecondary) {
-    // Sync time
-    configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER);
+    // Sync time once; weather data may later replace the fallback timezone.
+    applyTimeZoneOffset(GMT_OFFSET_SEC, true);
+    appliedGmtOffsetSec = GMT_OFFSET_SEC;
+    weatherTimeZoneApplied = false;
 
     // Show success briefly
     canvas.fillScreen(Color::BG_DAY);
@@ -1204,6 +1254,7 @@ void initOnlineServices(bool usedSecondary) {
     // Uses setBufferSizes(1024,512) to minimize TLS heap fragmentation so that
     // the 160KB voice buffer can still find a contiguous block afterward.
     weatherClient.begin(Config::getCity());
+    applyWeatherTimeZone(weatherClient.getData());
 
     // Init voice input — allocates 160KB contiguous buffer
     voiceInput.begin(sttHost, sttPort);

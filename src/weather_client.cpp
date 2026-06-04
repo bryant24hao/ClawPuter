@@ -239,14 +239,22 @@ bool WeatherClient::fetchWeather() {
 
     data.temperature = current["temperature_2m"] | 0.0f;
     data.humidity = current["relative_humidity_2m"] | 0;
+    JsonVariant utcOffset = doc["utc_offset_seconds"];
+    if (!utcOffset.isNull()) {
+        data.utcOffsetSeconds = utcOffset.as<long>();
+        data.timezoneValid = true;
+    } else {
+        data.timezoneValid = false;
+    }
     int code = current["weather_code"] | 0;
     data.isDay = (current["is_day"] | 1) != 0;
     data.type = codeToType(code);
     data.valid = true;
     lastUpdate = millis();
 
-    Serial.printf("[WEATHER] %.1f C, %d%% RH, code=%d, type=%d, day=%d\n",
-                  data.temperature, data.humidity, code, (int)data.type, data.isDay);
+    Serial.printf("[WEATHER] %.1f C, %d%% RH, code=%d, type=%d, day=%d, utc_offset=%ld\n",
+                  data.temperature, data.humidity, code, (int)data.type, data.isDay,
+                  data.timezoneValid ? data.utcOffsetSeconds : 0);
     return true;
 }
 

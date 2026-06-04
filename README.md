@@ -28,7 +28,7 @@ The idea started one afternoon at a friend's office. We were chatting about [Ope
 - **Thinking Model Compatibility** — Works with reasoning models (GPT-5.4, Claude, etc.) that output extended thinking. Thinking content is automatically filtered, with a "thinking..." indicator shown during the thinking phase. Gateway fallback injection is detected and handled gracefully.
 - **OpenClaw Integration** — Connects to your local OpenClaw Gateway over LAN. Multi-model fallback (Kimi/Claude/GPT/Gemini), persistent memory, 5400+ community skills.
 - **Dual WiFi + Offline Mode** — Auto-fallback to secondary WiFi (e.g. phone hotspot). Gateway host switches automatically. Offline mode if all WiFi fails (companion works, chat shows offline).
-- **Runtime Config** — Setup wizard to configure WiFi, Gateway, STT host at runtime. Build-time values as defaults, Fn+R to reset.
+- **Runtime Config** — Setup wizard to configure WiFi, Gateway, STT host at runtime. Build-time values are used only when saved values are empty; Fn+R opens setup without clearing saved config, while Fn+Shift+R resets saved config.
 - **Boot Animation** — Lobster pixel-art line-by-line reveal with pixel wipe transitions between modes.
 - **Sound Effects** — Key clicks, happy melody, typing chirps during AI streaming, notification tones.
 
@@ -115,7 +115,8 @@ pio device monitor
 | H | Spray water (when moisture ≤ 1) | Spray water (when moisture ≤ 1), otherwise type 'h' |
 | Fn + W | Toggle weather simulation | — |
 | 1-8 (in weather sim) | Select weather type | — |
-| Fn + R | Reset config + setup wizard | — |
+| Fn + R | Open setup wizard | — |
+| Fn + Shift + R | Reset config + setup wizard | — |
 | Fn + 0 | Debug: set moisture to 0 | — |
 | Any key (while sleeping) | Wake up lobster | — |
 | Any key (during TTS) | — | Stop voice playback |

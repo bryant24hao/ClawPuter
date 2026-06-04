@@ -86,6 +86,7 @@ static bool weatherTimeZoneApplied = false;
 // ── Forward declarations ──
 void fillBuildTimeDefaults();
 void enterSetupMode();
+void showConfigResetMessage();
 void updateSetupMode();
 void handleSetupKey(char key, bool enter, bool backspace, bool tab);
 void enterSettingsMode();
@@ -99,6 +100,7 @@ void updateScreenTimeout();
 static void formatFixedTimeZone(long utcOffsetSeconds, char* buf, size_t bufSize);
 static void applyTimeZoneOffset(long utcOffsetSeconds, bool syncNtp);
 static void applyWeatherTimeZone(const WeatherData& data);
+static bool isRKey(char key);
 bool tryConnect(const String& ssid, const String& pass, bool useSavedIpConfig = true);
 void connectWiFi();
 void initOnlineServices(bool usedSecondary);
@@ -241,11 +243,19 @@ void loop() {
                     companion.debugSetMoisture(0);
                     break;
                 }
-                // Fn+R = reset config
-                if (ks.fn && ks.word.size() > 0 && ks.word[0] == 'r') {
+                // Fn+Shift+R = reset saved config + setup wizard
+                if (ks.fn && ks.shift && ks.word.size() > 0 && isRKey(ks.word[0])) {
                     Config::reset();
                     fillBuildTimeDefaults();
                     Config::save();
+                    showConfigResetMessage();
+                    enterSetupMode();
+                    break;
+                }
+                // Fn+R = setup wizard
+                if (ks.fn && ks.word.size() > 0 && isRKey(ks.word[0])) {
+                    Config::load();
+                    fillBuildTimeDefaults();
                     enterSetupMode();
                     break;
                 }
@@ -539,6 +549,10 @@ static int clampInt(int value, int minValue, int maxValue) {
     return value;
 }
 
+static bool isRKey(char key) {
+    return key == 'r' || key == 'R';
+}
+
 void applyBrightness() {
     if (!screenOff) M5Cardputer.Display.setBrightness(Config::getBrightness());
 }
@@ -719,6 +733,19 @@ void enterSetupMode() {
     appMode = AppMode::SETUP;
     setupStep = SetupStep::SSID;
     setupInput = "";
+}
+
+void showConfigResetMessage() {
+    canvas.fillScreen(Color::BG_DAY);
+    canvas.setTextColor(Color::CHAT_AI);
+    canvas.setTextSize(1);
+    canvas.drawString("Config reset", 78, 34);
+    canvas.setTextColor(Color::CLOCK_TEXT);
+    canvas.drawString("Saved settings cleared", 45, 54);
+    canvas.setTextColor(Color::STATUS_DIM);
+    canvas.drawString("Opening setup...", 65, 76);
+    canvas.pushSprite(0, 0);
+    delay(900);
 }
 
 // Helper: get display hint for current value (for setup screen)
@@ -1172,9 +1199,10 @@ void connectWiFi() {
         canvas.drawString("WiFi failed!", 80, 20);
 
         canvas.setTextColor(Color::CLOCK_TEXT);
-        canvas.drawString("[Enter]  Retry", 60, 48);
-        canvas.drawString("[Fn+R]   Setup wizard", 60, 63);
-        canvas.drawString("[Tab]    Offline mode", 60, 78);
+        canvas.drawString("[Enter] Retry", 52, 44);
+        canvas.drawString("[Fn+R] Setup", 52, 59);
+        canvas.drawString("[Fn+Shift+R] Reset", 52, 74);
+        canvas.drawString("[Tab] Offline", 52, 89);
         canvas.pushSprite(0, 0);
 
         // Wait for user choice
@@ -1188,12 +1216,19 @@ void connectWiFi() {
                     retry = true;
                     break;  // break inner loop, outer loop retries
                 }
-                if (ks.fn && ks.word.size() > 0 && ks.word[0] == 'r') {
-                    // Reset + setup wizard
-                    WiFi.disconnect(true);
+                if (ks.fn && ks.shift && ks.word.size() > 0 && isRKey(ks.word[0])) {
+                    // Reset saved config + setup wizard
                     Config::reset();
                     fillBuildTimeDefaults();
                     Config::save();
+                    showConfigResetMessage();
+                    enterSetupMode();
+                    return;
+                }
+                if (ks.fn && ks.word.size() > 0 && isRKey(ks.word[0])) {
+                    // Setup wizard
+                    Config::load();
+                    fillBuildTimeDefaults();
                     enterSetupMode();
                     return;
                 }

@@ -786,7 +786,7 @@ void updateSetupMode() {
             canvas.setTextColor(Color::WHITE);
             canvas.drawString((setupInput + "_").c_str(), 10, 42);
             canvas.setTextColor(Color::STATUS_DIM);
-            canvas.drawString("Empty=DHCP, '-' clear", 10, 62);
+            canvas.drawString("[Enter] keep, '-' clear", 10, 62);
             canvas.drawString("[Tab] cancel", 170, 62);
             break;
 
@@ -798,7 +798,7 @@ void updateSetupMode() {
             canvas.setTextColor(Color::WHITE);
             canvas.drawString((setupInput + "_").c_str(), 10, 42);
             canvas.setTextColor(Color::STATUS_DIM);
-            canvas.drawString("Empty keep, '-' clear", 10, 62);
+            canvas.drawString("[Enter] keep, '-' clear", 10, 62);
             canvas.drawString("[Tab] cancel", 170, 62);
             break;
 
@@ -810,7 +810,7 @@ void updateSetupMode() {
             canvas.setTextColor(Color::WHITE);
             canvas.drawString((setupInput + "_").c_str(), 10, 42);
             canvas.setTextColor(Color::STATUS_DIM);
-            canvas.drawString("Empty=/24, '-' clear", 10, 62);
+            canvas.drawString("[Enter] keep, '-' clear", 10, 62);
             canvas.drawString("[Tab] cancel", 170, 62);
             break;
 
@@ -822,7 +822,7 @@ void updateSetupMode() {
             canvas.setTextColor(Color::WHITE);
             canvas.drawString((setupInput + "_").c_str(), 10, 42);
             canvas.setTextColor(Color::STATUS_DIM);
-            canvas.drawString("Empty keep, '-' clear", 10, 62);
+            canvas.drawString("[Enter] keep, '-' clear", 10, 62);
             canvas.drawString("[Tab] cancel", 170, 62);
             break;
 
@@ -834,7 +834,7 @@ void updateSetupMode() {
             canvas.setTextColor(Color::WHITE);
             canvas.drawString((setupInput + "_").c_str(), 10, 42);
             canvas.setTextColor(Color::STATUS_DIM);
-            canvas.drawString("Empty keep, '-' clear", 10, 62);
+            canvas.drawString("[Enter] keep, '-' clear", 10, 62);
             canvas.drawString("[Tab] cancel", 170, 62);
             break;
 

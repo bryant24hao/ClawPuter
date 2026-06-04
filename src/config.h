@@ -24,7 +24,9 @@ namespace Config {
     const String& getPassword2();
     const String& getGatewayHost2();
     const String& getCity();
+    const String& getWifiLocalIp();
     const String& getWifiGateway();
+    const String& getWifiSubnet();
     const String& getWifiDns1();
     const String& getWifiDns2();
     uint8_t getBrightness();
@@ -44,7 +46,9 @@ namespace Config {
     void setPassword2(const String& password);
     void setGatewayHost2(const String& host);
     void setCity(const String& city);
+    void setWifiLocalIp(const String& ip);
     void setWifiGateway(const String& gateway);
+    void setWifiSubnet(const String& subnet);
     void setWifiDns1(const String& dns);
     void setWifiDns2(const String& dns);
     void setBrightness(uint8_t value);

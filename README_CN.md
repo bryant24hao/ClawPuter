@@ -20,7 +20,7 @@ M5Stack Cardputer (ESP32-S3) 上的像素风桌面伴侣。小龙虾角色 + 动
 - **天气模拟** — Fn+W 切换模拟模式，数字键 1-8 预览全部 8 种天气类型（晴天、多云、阴天、雾、小雨、大雨、雪、雷暴）。
 - **聊天模式** — 键盘输入，AI 对话支持 SSE 流式响应（逐字显示），消息自动换行和翻页滚动。
 - **像素画生成** — `/draw a cat` 生成 8x8 AI 像素画，渲染为 96x96 彩色网格嵌入聊天。`/draw16` 生成 16x16。16 色固定调色板，自动同步到 Mac 桌面。
-- **语音输入** — 按住 Fn 键说话（最长 3 秒），松开后通过 Groq Whisper API 语音转文字，识别结果自动填入输入栏。
+- **语音输入** — 按住 Fn 键说话（最长 3 秒），松开后通过 Groq Whisper API 或本地 faster-whisper 语音转文字，识别结果自动填入输入栏。
 - **TTS 语音回复** — AI 回复通过扬声器朗读。按任意键可中断播放。麦克风和扬声器共享 GPIO 43，系统自动切换。
 - **桌面宠物同步** — macOS 端桌面宠物应用，通过 UDP 接收小龙虾状态、位置和天气信息，实时同步动画。支持跟随模式（跟踪光标）和场景模式（天气面板）。
 - **桌面双向控制** — Mac ↔ ESP32 双向通信。远程触发动画、发送文字/消息到 Cardputer、转发通知为 Toast 叠加层、查看同步聊天历史、弹窗展示高清像素画。宠物在 Chat Viewer 打开时自动停靠在窗口顶部。
@@ -45,7 +45,12 @@ export OPENCLAW_PORT="<your-port>"           # Gateway 端口
 export OPENCLAW_TOKEN="<your-gateway-token>"
 
 # 语音输入（可选，供 stt_proxy.py 使用）
-export GROQ_API_KEY="<your-groq-api-key>"    # 供 tools/stt_proxy.py 使用，非固件
+export STT_BACKEND="groq"                    # "groq" 或 "local"
+export GROQ_API_KEY="<your-groq-api-key>"    # 仅 STT_BACKEND=groq 需要
+export WHISPER_MODEL="base"                  # 仅 STT_BACKEND=local 使用
+export WHISPER_DEVICE="cpu"                  # cpu/cuda/auto，取决于你的机器
+export WHISPER_COMPUTE_TYPE="int8"           # CPU 推荐 int8，很多 GPU 可用 float16
+export WHISPER_LANGUAGE=""                   # 可选语言提示，如 en 或 zh
 export STT_PROXY_HOST="<your-host-ip>"       # 运行 stt_proxy.py 的机器 IP
 export STT_PROXY_PORT="8090"                 # STT 代理端口（默认 8090）
 
@@ -69,10 +74,16 @@ pio run -t upload
 ### 3. 启动 STT 代理（语音输入）
 
 ```bash
+# Groq STT（默认）
+pip install -r tools/requirements.txt
 python3 tools/stt_proxy.py
+
+# 本地 faster-whisper STT
+pip install -r tools/requirements-local.txt
+STT_BACKEND=local python3 tools/stt_proxy.py
 ```
 
-代理运行在 Mac/PC 上，将 Cardputer 录制的音频转发到 Groq Whisper API 进行语音识别。需要在 `.env` 或环境变量中配置 `GROQ_API_KEY`。
+代理运行在 Mac/PC 上，接收 Cardputer 录制的音频并返回识别结果。默认转发到 Groq Whisper API，需要在 `.env` 或环境变量中配置 `GROQ_API_KEY`；使用 `tools/requirements-local.txt` 并设置 `STT_BACKEND=local` 可改用本地 faster-whisper。
 
 ### 4. 串口调试
 
@@ -94,6 +105,7 @@ pio device monitor
 | Fn（长按） | — | 按住说话，松开转文字 |
 | Fn + ; | — | 向上翻页 |
 | Fn + / | — | 向下翻页 |
+| Fn + S | 设备设置 | 设备设置 |
 | Fn + W | 切换天气模拟 | — |
 | 1-8（天气模拟中） | 切换天气类型 | — |
 | Fn + R | 重置配置 + Setup 向导 | — |
@@ -125,7 +137,7 @@ pio device monitor
 
 - 键盘输入消息，Enter 发送。AI 回复逐字流式显示，配打字音效。
 - **像素画**：输入 `/draw a cat` 生成 8x8 像素画，或 `/draw16 a heart` 生成 16x16。AI 返回十六进制编码的像素数据，渲染为 96x96 彩色网格嵌入聊天消息。16 色固定调色板，解析失败自动降级为普通文字。
-- **语音输入**：按住 Fn 录音（最长 3 秒），松开后发送到 Groq Whisper 转文字。转写过程中显示 "Transcribing..." 进度条。
+- **语音输入**：按住 Fn 录音（最长 3 秒），松开后发送到配置的 STT 代理后端转文字。转写过程中显示 "Transcribing..." 进度条。
 - **TTS 语音回复**：AI 回复完成后，通过扬声器朗读回复内容。按任意键可中断播放。
 - **离线模式**：未连接 WiFi 时，发送消息显示 `[Offline] No network connection`。
 
@@ -160,7 +172,8 @@ cd desktop/CardputerDesktopPet && ./run.sh
 
 - **双 WiFi**：主 WiFi 连不上 → 自动尝试备用 WiFi（如手机热点），Gateway IP 自动切换。
 - **离线模式**：所有 WiFi 失败后，按 Tab 进入离线伴侣模式（动画、时钟、音效照常工作）。
-- **运行时配置**：Fn+R 打开 Setup 向导，可修改 WiFi SSID/密码、Gateway 地址/端口/Token、STT Host，无需重新烧录。
+- **运行时配置**：Fn+R 打开 Setup 向导，可修改 WiFi SSID/密码、Gateway 地址/端口/Token、STT Host，以及可选静态 IP/Gateway/子网/DNS 设置，无需重新烧录。
+- **设备设置**：Fn+S 打开亮度、音量、息屏超时和立即息屏控制，这些设置会保存在设备上。
 - **WiFi 失败菜单**：连接失败后提供三个选项——重试 / Setup 向导 / 离线模式。
 
 ## 项目结构
@@ -196,7 +209,7 @@ desktop/
     └── run.sh                    # 编译、打包、签名、启动脚本
 
 tools/
-└── stt_proxy.py          # 本地 HTTP 代理：ESP32 音频 → Groq Whisper API + TTS
+└── stt_proxy.py          # 本地 HTTP 代理：ESP32 音频 → Groq/本地 Whisper + TTS
 ```
 
 ## iPhone 热点小贴士
@@ -255,7 +268,7 @@ tools/
 ## 路线图
 
 - [x] 流式响应（SSE 逐字显示）
-- [x] 语音输入（按住说话 + Groq Whisper 语音转文字）
+- [x] 语音输入（按住说话 + Groq 或本地 Whisper 语音转文字）
 - [x] 桌面宠物同步（macOS 端通过 UDP 同步）
 - [x] 双 WiFi + 离线模式 + 运行时配置
 - [x] TTS 语音回复（AI 通过扬声器播放回复）

@@ -67,7 +67,7 @@ static bool screenOff = false;
 static unsigned long lastInteractionMs = 0;
 
 // ── Setup mode state ──
-enum class SetupStep { SSID, PASSWORD, GATEWAY_HOST, GATEWAY_PORT, GATEWAY_TOKEN, STT_HOST, WIFI_GATEWAY, WIFI_DNS1, WIFI_DNS2, CONNECTING };
+enum class SetupStep { SSID, PASSWORD, GATEWAY_HOST, GATEWAY_PORT, GATEWAY_TOKEN, STT_HOST, WIFI_IP, WIFI_GATEWAY, WIFI_SUBNET, WIFI_DNS1, WIFI_DNS2, CONNECTING };
 static SetupStep setupStep = SetupStep::SSID;
 static String setupInput;
 static int settingsIndex = 0;
@@ -90,7 +90,7 @@ void applyVolume();
 void turnScreenOff();
 void wakeScreen();
 void updateScreenTimeout();
-bool tryConnect(const String& ssid, const String& pass);
+bool tryConnect(const String& ssid, const String& pass, bool useSavedIpConfig = true);
 void connectWiFi();
 void initOnlineServices(bool usedSecondary);
 void enterCompanionMode();
@@ -778,6 +778,18 @@ void updateSetupMode() {
             canvas.drawString("[Tab] cancel", 170, 62);
             break;
 
+        case SetupStep::WIFI_IP:
+            canvas.drawString("WiFi IP:", 10, 25);
+            getDefaultHint(hint, sizeof(hint), Config::getWifiLocalIp(), false);
+            canvas.setTextColor(Color::STATUS_DIM);
+            canvas.drawString(hint, 70, 25);
+            canvas.setTextColor(Color::WHITE);
+            canvas.drawString((setupInput + "_").c_str(), 10, 42);
+            canvas.setTextColor(Color::STATUS_DIM);
+            canvas.drawString("Empty=DHCP, '-' clear", 10, 62);
+            canvas.drawString("[Tab] cancel", 170, 62);
+            break;
+
         case SetupStep::WIFI_GATEWAY:
             canvas.drawString("WiFi Gateway:", 10, 25);
             getDefaultHint(hint, sizeof(hint), Config::getWifiGateway(), false);
@@ -787,6 +799,18 @@ void updateSetupMode() {
             canvas.drawString((setupInput + "_").c_str(), 10, 42);
             canvas.setTextColor(Color::STATUS_DIM);
             canvas.drawString("Empty keep, '-' clear", 10, 62);
+            canvas.drawString("[Tab] cancel", 170, 62);
+            break;
+
+        case SetupStep::WIFI_SUBNET:
+            canvas.drawString("WiFi Subnet:", 10, 25);
+            getDefaultHint(hint, sizeof(hint), Config::getWifiSubnet(), false);
+            canvas.setTextColor(Color::STATUS_DIM);
+            canvas.drawString(hint, 100, 25);
+            canvas.setTextColor(Color::WHITE);
+            canvas.drawString((setupInput + "_").c_str(), 10, 42);
+            canvas.setTextColor(Color::STATUS_DIM);
+            canvas.drawString("Empty=/24, '-' clear", 10, 62);
             canvas.drawString("[Tab] cancel", 170, 62);
             break;
 
@@ -897,6 +921,16 @@ void handleSetupKey(char key, bool enter, bool backspace, bool tab) {
                 Config::setSttHost(setupInput);
             }
             setupInput = "";
+            setupStep = SetupStep::WIFI_IP;
+            break;
+
+        case SetupStep::WIFI_IP:
+            if (setupInput == "-") {
+                Config::setWifiLocalIp("");
+            } else if (setupInput.length() > 0) {
+                Config::setWifiLocalIp(setupInput);
+            }
+            setupInput = "";
             setupStep = SetupStep::WIFI_GATEWAY;
             break;
 
@@ -905,6 +939,16 @@ void handleSetupKey(char key, bool enter, bool backspace, bool tab) {
                 Config::setWifiGateway("");
             } else if (setupInput.length() > 0) {
                 Config::setWifiGateway(setupInput);
+            }
+            setupInput = "";
+            setupStep = SetupStep::WIFI_SUBNET;
+            break;
+
+        case SetupStep::WIFI_SUBNET:
+            if (setupInput == "-") {
+                Config::setWifiSubnet("");
+            } else if (setupInput.length() > 0) {
+                Config::setWifiSubnet(setupInput);
             }
             setupInput = "";
             setupStep = SetupStep::WIFI_DNS1;
@@ -951,35 +995,59 @@ static bool parseIpAddress(const String& value, IPAddress& out) {
 }
 
 static void applyWiFiIpConfig() {
+    IPAddress localIp;
     IPAddress gateway;
+    IPAddress subnet;
     IPAddress dns1;
     IPAddress dns2;
+    bool hasLocalIp = parseIpAddress(Config::getWifiLocalIp(), localIp);
     bool hasGateway = parseIpAddress(Config::getWifiGateway(), gateway);
+    bool hasSubnet = parseIpAddress(Config::getWifiSubnet(), subnet);
     bool hasDns1 = parseIpAddress(Config::getWifiDns1(), dns1);
     bool hasDns2 = parseIpAddress(Config::getWifiDns2(), dns2);
-    if (!hasGateway && !hasDns1 && !hasDns2) return;
 
     IPAddress unset;
-    IPAddress subnet = hasGateway ? IPAddress(255, 255, 255, 0) : unset;
-    if (!hasGateway) gateway = unset;
+    if (hasLocalIp) {
+        if (!hasSubnet) subnet = IPAddress(255, 255, 255, 0);
+        if (!hasGateway) gateway = unset;
+    } else {
+        if (hasGateway || hasSubnet) {
+            Serial.println("[WIFI] Gateway/subnet ignored because WiFi IP is DHCP");
+        }
+        localIp = unset;
+        gateway = unset;
+        subnet = unset;
+    }
     if (!hasDns1) dns1 = unset;
     if (!hasDns2) dns2 = unset;
 
-    bool ok = WiFi.config(unset, gateway, subnet, dns1, dns2);
-    Serial.printf("[WIFI] Static net config: gw=%s dns1=%s dns2=%s -> %s\n",
-                  Config::getWifiGateway().length() ? Config::getWifiGateway().c_str() : "dhcp",
-                  Config::getWifiDns1().length() ? Config::getWifiDns1().c_str() : "dhcp",
-                  Config::getWifiDns2().length() ? Config::getWifiDns2().c_str() : "dhcp",
+    bool ok = WiFi.config(localIp, gateway, subnet, dns1, dns2);
+    Serial.printf("[WIFI] Net config: ip=%s gw=%s subnet=%s dns1=%s dns2=%s -> %s\n",
+                  hasLocalIp ? localIp.toString().c_str() : "dhcp",
+                  hasLocalIp && hasGateway ? gateway.toString().c_str() : "dhcp",
+                  hasLocalIp ? subnet.toString().c_str() : "dhcp",
+                  hasDns1 ? dns1.toString().c_str() : "dhcp",
+                  hasDns2 ? dns2.toString().c_str() : "dhcp",
                   ok ? "OK" : "FAILED");
 }
 
+static void applyWiFiDhcpConfig() {
+    IPAddress unset;
+    bool ok = WiFi.config(unset, unset, unset, unset, unset);
+    Serial.printf("[WIFI] Net config: dhcp -> %s\n", ok ? "OK" : "FAILED");
+}
+
 // Try connecting to a single WiFi network. Returns true on success.
-bool tryConnect(const String& ssid, const String& pass) {
+bool tryConnect(const String& ssid, const String& pass, bool useSavedIpConfig) {
     Serial.printf("[WIFI] Trying %s...\n", ssid.c_str());
 
     WiFi.disconnect(true);
     delay(100);
-    applyWiFiIpConfig();
+    if (useSavedIpConfig) {
+        applyWiFiIpConfig();
+    } else {
+        applyWiFiDhcpConfig();
+    }
     WiFi.begin(ssid.c_str(), pass.c_str());
 
     int attempts = 0;
@@ -1020,7 +1088,7 @@ void connectWiFi() {
         // Try secondary WiFi if primary failed and secondary is configured
         bool usedSecondary = false;
         if (!connected && Config::getSSID2().length() > 0) {
-            connected = tryConnect(Config::getSSID2(), Config::getPassword2());
+            connected = tryConnect(Config::getSSID2(), Config::getPassword2(), false);
             if (connected) usedSecondary = true;
         }
 

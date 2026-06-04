@@ -21,7 +21,7 @@ The idea started one afternoon at a friend's office. We were chatting about [Ope
 - **Weather Simulation** — Fn+W toggles simulation mode, number keys 1-8 to preview all 8 weather types (Clear, Cloudy, Overcast, Fog, Drizzle, Rain, Snow, Thunder).
 - **Chat Mode** — Full keyboard input, AI conversation with SSE streaming (token-by-token display), scrollable message history with word-wrap.
 - **Pixel Art Generation** — `/draw a cat` generates 8x8 AI pixel art rendered as a 96x96 color grid in chat. `/draw16` for 16x16. 16-color palette, mixed with text messages, auto-syncs to Mac desktop.
-- **Voice Input** — Push-to-talk via Fn key, speech-to-text via Groq Whisper API (through a local proxy server).
+- **Voice Input** — Push-to-talk via Fn key, speech-to-text via Groq Whisper API or local faster-whisper (through a local proxy server).
 - **TTS Voice Replies** — AI responses are spoken through the built-in speaker. Press any key to interrupt playback. Mic and speaker share GPIO 43 — the system handles switching automatically.
 - **Desktop Pet Sync** — macOS companion app receives lobster state, position, and weather over UDP, rendering a synced desktop pet on your Mac. Supports Follow Mode (cursor tracking) and Scene Mode (weather panel).
 - **Desktop Bidirectional Control** — Mac ↔ ESP32 two-way communication. Remote trigger animations, send text/messages to Cardputer, forward notifications as toast overlays, view synced chat history, and display pixel art in a high-res popover. Pet perches on the Chat Viewer window when open.
@@ -47,7 +47,12 @@ export OPENCLAW_PORT="<your-port>"           # Gateway port
 export OPENCLAW_TOKEN="<your-gateway-token>"
 
 # Voice Input (optional, for stt_proxy.py)
-export GROQ_API_KEY="<your-groq-api-key>"    # Used by tools/stt_proxy.py, not the firmware
+export STT_BACKEND="groq"                    # "groq" or "local"
+export GROQ_API_KEY="<your-groq-api-key>"    # Required only for STT_BACKEND=groq
+export WHISPER_MODEL="base"                  # Used only for STT_BACKEND=local
+export WHISPER_DEVICE="cpu"                  # cpu/cuda/auto, depending on your machine
+export WHISPER_COMPUTE_TYPE="int8"           # int8 for CPU, float16 for many GPUs
+export WHISPER_LANGUAGE=""                   # Optional language hint, e.g. en or zh
 export STT_PROXY_HOST="<your-host-ip>"       # Machine running stt_proxy.py
 export STT_PROXY_PORT="8090"                 # STT proxy port (default 8090)
 
@@ -71,10 +76,16 @@ First-time flashing may require download mode: hold **G0** + press **Reset**, th
 ### 3. Start STT Proxy (for voice input)
 
 ```bash
+# Groq STT (default)
+pip install -r tools/requirements.txt
 python3 tools/stt_proxy.py
+
+# Local faster-whisper STT
+pip install -r tools/requirements-local.txt
+STT_BACKEND=local python3 tools/stt_proxy.py
 ```
 
-The proxy runs on your Mac/PC, relays audio from the Cardputer to Groq Whisper API, and returns transcriptions. Requires `GROQ_API_KEY` in your `.env` or environment.
+The proxy runs on your Mac/PC, receives audio from the Cardputer, and returns transcriptions. By default it forwards STT to Groq and requires `GROQ_API_KEY`. Use `tools/requirements-local.txt` and `STT_BACKEND=local` for local faster-whisper.
 
 ### 4. Serial Debug
 
@@ -96,6 +107,7 @@ pio device monitor
 | Fn (hold) | — | Push-to-talk voice input |
 | Fn + ; | — | Scroll up |
 | Fn + / | — | Scroll down |
+| Fn + S | Device settings | Device settings |
 | H | Spray water (when moisture ≤ 1) | Spray water (when moisture ≤ 1), otherwise type 'h' |
 | Fn + W | Toggle weather simulation | — |
 | 1-8 (in weather sim) | Select weather type | — |
@@ -142,7 +154,7 @@ A virtual hydration mechanic tied to real-world weather:
 
 - Type messages and press Enter to send. AI replies stream token-by-token with typing sound effects.
 - **Pixel art**: Type `/draw a cat` to generate an 8x8 pixel art, or `/draw16 a heart` for 16x16. AI returns hex-encoded pixel data, rendered as a 96x96 color grid inline with chat messages. 16-color fixed palette. Parse failures gracefully fall back to plain text.
-- **Voice input**: Hold Fn to record (up to 3 seconds), release to transcribe via Groq Whisper. A "Transcribing..." progress bar is shown during processing. Transcription fills the input bar.
+- **Voice input**: Hold Fn to record (up to 3 seconds), release to transcribe via the configured STT proxy backend. A "Transcribing..." progress bar is shown during processing. Transcription fills the input bar.
 - **TTS**: After AI replies, the response is spoken through the built-in speaker. A "Speaking..." indicator is shown during audio download. Press any key to stop playback.
 - **Scrolling**: Use Fn+; to scroll up and Fn+/ to scroll down through message history.
 - **Offline mode**: If WiFi is not connected, sending a message shows `[Offline] No network connection`.
@@ -178,7 +190,8 @@ This builds the Swift app, wraps it in a `.app` bundle with `Info.plist` (requir
 
 - **Dual WiFi**: Primary WiFi fails → automatically tries secondary (e.g. phone hotspot). Gateway host switches automatically.
 - **Offline mode**: If all WiFi fails, press Tab to enter offline companion mode (animations, clock, sound effects all work).
-- **Runtime config**: Fn+R opens a setup wizard to change WiFi SSID/password, Gateway host/port/token, STT host — no re-flashing needed. Press Tab in setup to cancel and return to companion mode.
+- **Runtime config**: Fn+R opens a setup wizard to change WiFi SSID/password, Gateway host/port/token, STT host, and optional static IP/gateway/subnet/DNS settings — no re-flashing needed. Press Tab in setup to cancel and return to companion mode.
+- **Device settings**: Fn+S opens brightness, volume, screen timeout, and screen-off controls. These settings are saved on device.
 - **WiFi failure menu**: Retry / Setup wizard (Fn+R) / Offline mode (Tab) — no more stuck on "Connecting...".
 
 ## Project Structure
@@ -214,7 +227,7 @@ desktop/
     └── run.sh                    # Build, bundle, sign, and launch script
 
 tools/
-└── stt_proxy.py          # Local HTTP proxy: ESP32 audio → Groq Whisper API + TTS
+└── stt_proxy.py          # Local HTTP proxy: ESP32 audio → Groq/local Whisper + TTS
 ```
 
 ## iPhone Hotspot Tips
@@ -273,7 +286,7 @@ See [OpenClaw Research](docs/openclaw-research.md) for the full integration guid
 ## Roadmap
 
 - [x] Streaming responses (SSE token-by-token display)
-- [x] Voice input (push-to-talk + Groq Whisper STT)
+- [x] Voice input (push-to-talk + Groq or local Whisper STT)
 - [x] Desktop pet sync (macOS companion via UDP)
 - [x] Dual WiFi + offline mode + runtime config
 - [x] TTS voice replies (AI speaks through speaker)

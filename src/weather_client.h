@@ -19,6 +19,8 @@ struct WeatherData {
     WeatherType type = WeatherType::UNKNOWN;
     bool isDay = true;
     bool valid = false;
+    long utcOffsetSeconds = 0;
+    bool timezoneValid = false;
 };
 
 class WeatherClient {

@@ -7,3 +7,5 @@
 .DS_Store
 CLAUDE.md
 *.app/
+*.pyc
+.pytest_cache/

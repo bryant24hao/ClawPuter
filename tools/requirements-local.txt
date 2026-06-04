@@ -1,0 +1,7 @@
+# Dependencies for tools/stt_proxy.py with local faster-whisper STT.
+#
+# Install:
+#   pip install -r tools/requirements-local.txt
+
+-r requirements.txt
+faster-whisper>=1.1.0

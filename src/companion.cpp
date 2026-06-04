@@ -46,8 +46,15 @@ void Companion::initStars() {
 
 int Companion::currentHour() {
     struct tm timeinfo;
-    if (!getLocalTime(&timeinfo, 0)) return 12; // default to noon
-    return timeinfo.tm_hour;
+    static int lastHour = 12; // default to noon until time is synced
+    static bool hasLastHour = false;
+
+    if (getLocalTime(&timeinfo, 0)) {
+        lastHour = timeinfo.tm_hour;
+        hasLastHour = true;
+    }
+
+    return hasLastHour ? lastHour : 12;
 }
 
 int Companion::displayHour() {
@@ -660,15 +667,18 @@ void Companion::drawSprite16(M5Canvas& canvas, int x, int y, const uint16_t* dat
 
 void Companion::drawClock(M5Canvas& canvas) {
     struct tm timeinfo;
-    if (!getLocalTime(&timeinfo, 0)) {
+    static char lastTimeStr[6] = "--:--";
+    static bool hasLastTime = false;
+
+    if (getLocalTime(&timeinfo, 0)) {
+        snprintf(lastTimeStr, sizeof(lastTimeStr), "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
+        hasLastTime = true;
+    } else if (!hasLastTime) {
         canvas.setTextColor(Color::CLOCK_TEXT);
         canvas.setTextSize(1);
         canvas.drawString("--:--", SCREEN_W / 2 - 15, GROUND_Y + 8);
         return;
     }
-
-    char timeStr[6];
-    snprintf(timeStr, sizeof(timeStr), "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
 
     canvas.setTextColor(Color::CLOCK_TEXT);
     canvas.setTextSize(2);
@@ -693,14 +703,14 @@ void Companion::drawClock(M5Canvas& canvas) {
         }
     }
 
-    int tw = canvas.textWidth(timeStr);
+    int tw = canvas.textWidth(lastTimeStr);
     int sep = weather.valid ? 10 : 0; // space before separator
     int sepW = weather.valid ? 1 : 0; // separator line width
     int sep2 = weather.valid ? 10 : 0; // space after separator
     int totalW = tw + sep + sepW + sep2 + tempW + humSepW + humW;
     int startX = (SCREEN_W - totalW) / 2;
 
-    canvas.drawString(timeStr, startX, GROUND_Y + 6);
+    canvas.drawString(lastTimeStr, startX, GROUND_Y + 6);
 
     if (weather.valid) {
         // Draw first separator line (before temperature)
